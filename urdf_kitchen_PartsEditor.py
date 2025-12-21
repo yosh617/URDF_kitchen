@@ -35,7 +35,7 @@ from Qt import QtWidgets, QtCore, QtGui
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QMainWindow, QVBoxLayout, QWidget, 
     QPushButton, QHBoxLayout, QCheckBox, QLineEdit, QLabel, QGridLayout,
-    QTextEdit, QButtonGroup, QRadioButton, QColorDialog, QDialog
+    QTextEdit, QButtonGroup, QRadioButton, QColorDialog, QDialog, QMessageBox
 )
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QTextOption, QColor, QPalette
@@ -79,20 +79,22 @@ def apply_dark_theme(self):
             background-color: #404244;
         }
         QPushButton {
-            background-color: #F0F0ED;
-            border: 1px solid #BBBBB7;
-            border-radius: 2px;
-            padding: 2px 2px;
-            color: #333333;
-            min-width: 80px;
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #5a5a5a, stop:1 #3a3a3a);
+            color: #ffffff;
+            border: 1px solid #707070;
+            border-radius: 5px;
+            padding: 1px 6px;
+            min-height: 18px;
         }
         QPushButton:hover {
-            background-color: #E6E6E3;
-            border: 1px solid #AAAAAA;
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #6a6a6a, stop:1 #4a4a4a);
         }
         QPushButton:pressed {
-            background-color: #DDDDD9;
-            padding-top: 4px;
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                            stop:0 #3a3a3a, stop:1 #5a5a5a);
+            padding-top: 6px;
             padding-bottom: 4px;
         }
         QLineEdit {
@@ -177,8 +179,10 @@ class CustomInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
     def __init__(self, parent=None):
         super(CustomInteractorStyle, self).__init__()
         self.parent = parent
+        self.last_click_time = 0  # 最後のクリック時刻を記録
         self.AddObserver("CharEvent", self.on_char_event)
         self.AddObserver("KeyPressEvent", self.on_key_press)
+        self.AddObserver("LeftButtonPressEvent", self.on_left_button_press)
 
     def on_char_event(self, obj, event):
         key = self.GetInteractor().GetKeySym()
@@ -271,11 +275,69 @@ class CustomInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
                     self.parent.update_point_position(i, x, y)
         self.OnMouseMove()
     
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("URDF Kitchen - PartsEditor v0.0.1 -")
-        self.setGeometry(0, 0, 1200, 600)
+    def on_left_button_press(self, obj, event):
+        """Ctrl + 左クリックでポイントの座標を設定"""
+        if self.parent:
+            ctrl_pressed = self.GetInteractor().GetControlKey()
+            if ctrl_pressed:
+                # import time
+                
+                # # 現在の時刻を取得
+                # current_time = time.time()
+                # time_diff = current_time - self.last_click_time
+                
+                # # 最後のクリックから0.2秒以内の場合は無視（連続呼び出しを防ぐ）
+                # if time_diff < 0.2:
+                #     return
+                
+                # self.last_click_time = current_time
+                
+                # マウスの位置を取得
+                x, y = self.GetInteractor().GetEventPosition()
+                
+                # チェックされているポイントに座標を設定
+                for i, checkbox in enumerate(self.parent.point_checkboxes):
+                    if checkbox.isChecked():
+                        self.parent.set_point_from_click(i, x, y)
+                
+                return  # イベントを消費して通常のカメラ操作を防ぐ
+        
+        # Ctrlが押されていない場合は通常の動作
+        self.OnLeftButtonDown()
+        
+class MainWidget(QWidget):
+    # ファイル保存シグナル（タブ間連携用）
+    from PySide6.QtCore import Signal
+    file_saved = Signal(str, str)  # (stl_path, xml_path)
+    
+    def __init__(self, event_bus=None, parent=None):
+        super().__init__(parent)
+        # タブ統合用のイベントバス
+        self.event_bus = event_bus
+        
+        # ボタンのスタイルを設定
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                stop:0 #5a5a5a, stop:1 #3a3a3a);
+                color: #ffffff;
+                border: 1px solid #707070;
+                border-radius: 5px;
+                padding: 1px 6px;
+                min-height: 18px;
+            }
+            QPushButton:hover {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                stop:0 #6a6a6a, stop:1 #4a4a4a);
+            }
+            QPushButton:pressed {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                stop:0 #3a3a3a, stop:1 #5a5a5a);
+                padding-top: 6px;
+                padding-bottom: 4px;
+            }
+        """)
+        
         self.camera_rotation = [0, 0, 0]  # [yaw, pitch, roll]
         self.absolute_origin = [0, 0, 0]  # 大原点の設定
         self.initial_camera_position = [10, 0, 0]  # 初期カメラ位置
@@ -292,9 +354,7 @@ class MainWindow(QMainWindow):
 
         self.com_actor = None  # 重心アクターを追跡するための新しい属性
 
-        central_widget = QWidget(self)
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)  # 垂直方向のレイアウトに変更
+        main_layout = QVBoxLayout(self)  # 垂直方向のレイアウトに変更
 
         # ファイル名表示用のラベル
         self.file_name_label = QLabel("File:")
@@ -309,13 +369,22 @@ class MainWindow(QMainWindow):
         content_layout = QHBoxLayout()
         main_layout.addLayout(content_layout)
 
-        # 左側のUI用ウィジェットとレイアウト
+        # 左側のUI用ウィジェットとレイアウト（スクロール可能に）
+        from PySide6.QtWidgets import QScrollArea
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setMinimumWidth(550)  # 最小幅を設定
+        scroll_area.setMaximumWidth(600)  # 最大幅を設定
+        
         left_widget = QWidget()
         self.left_layout = QVBoxLayout(left_widget)
-        content_layout.addWidget(left_widget, 1)  # stretch factorを1に設定
+        scroll_area.setWidget(left_widget)
+        content_layout.addWidget(scroll_area, 1)  # stretch factorを1に設定
 
         # 右側のVTKウィジェット
-        self.vtk_widget = QVTKRenderWindowInteractor(central_widget)
+        self.vtk_widget = QVTKRenderWindowInteractor(self)
         content_layout.addWidget(self.vtk_widget, 4)  # stretch factorを4に設定（UIより広いスペースを確保）
         
         self.setup_ui()
@@ -348,6 +417,18 @@ class MainWindow(QMainWindow):
         self.render_window.Render()
         self.render_window_interactor.Initialize()
         self.vtk_widget.GetRenderWindow().AddObserver("ModifiedEvent", self.update_all_points_size)
+
+    def cleanup(self):
+        """クリーンアップ処理"""
+        try:
+            if hasattr(self, 'render_window'):
+                self.render_window.Finalize()
+            if hasattr(self, 'animation_timer'):
+                self.animation_timer.stop()
+            if hasattr(self, 'rotation_timer'):
+                self.rotation_timer.stop()
+        except:
+            pass
 
     def setup_ui(self):
         self.setup_buttons()
@@ -597,6 +678,11 @@ class MainWindow(QMainWindow):
                 # テキストボックスを作成
                 input_field = QLineEdit(str(self.point_coords[i][j]))
                 input_field.setFixedWidth(80)  # テキストボックスの幅を固定
+                
+                # 入力フィールドにイベントハンドラを接続
+                input_field.editingFinished.connect(lambda idx=i: self.update_point_from_input(idx))
+                input_field.returnPressed.connect(lambda idx=i: self.update_point_from_input(idx))
+                
                 h_layout.addWidget(input_field)
                 
                 # 水平レイアウトを伸縮させないようにする
@@ -641,6 +727,28 @@ class MainWindow(QMainWindow):
 
         self.left_layout.addLayout(points_layout)
         
+    def update_point_from_input(self, index):
+        """入力フィールドから値を読み取ってポイント座標を更新"""
+        try:
+            x = float(self.point_inputs[index][0].text())
+            y = float(self.point_inputs[index][1].text())
+            z = float(self.point_inputs[index][2].text())
+            
+            # 値が変更されているかチェック
+            new_coords = [x, y, z]
+            if new_coords != self.point_coords[index]:
+                self.point_coords[index] = new_coords
+                
+                # 3D表示のみを更新（入力フィールドは更新しない）
+                self.update_point_actor(index)
+                
+                print(f"Point {index+1} updated to: ({x:.6f}, {y:.6f}, {z:.6f})")
+        except ValueError:
+            # 無効な入力の場合は元の値に戻す
+            for j in range(3):
+                self.point_inputs[index][j].setText(f"{self.point_coords[index][j]:.6f}")
+            print(f"Invalid input for Point {index+1}. Reverting to previous value.")
+        
     def set_point(self, index):
         try:
             x = float(self.point_inputs[index][0].text())
@@ -682,8 +790,6 @@ class MainWindow(QMainWindow):
     def reset_point_to_origin(self, index):
         self.point_coords[index] = list(self.absolute_origin)
         self.update_point_display(index)
-        if self.point_checkboxes[index].isChecked():
-            self.show_point(index)
         print(f"Point {index+1} reset to origin {self.absolute_origin}")
 
     def reset_camera(self):
@@ -726,6 +832,78 @@ class MainWindow(QMainWindow):
 
         print(f"Point {index+1} moved to: ({new_pos[0]:.6f}, {new_pos[1]:.6f}, {current_z:.6f})")
 
+    def set_point_from_click(self, index, x, y):
+        """Ctrl + クリックで3D空間のポイントに座標を設定"""
+        # VTKのCellPickerを使用（ワイヤーフレーム表示でも動作する）
+        picker = vtk.vtkCellPicker()
+        picker.SetTolerance(0.005)  # ピック範囲を広げる（デフォルト0.001）
+        
+        # STLアクターのみをピック対象に追加（ポイントの球体を除外）
+        if self.stl_actor:
+            picker.AddPickList(self.stl_actor)
+            picker.PickFromListOn()  # リストに追加されたアクターのみをピック対象にする
+        
+        pick_result = picker.Pick(x, y, 0, self.renderer)
+        
+        # ピックされた位置を取得
+        picked_pos = picker.GetPickPosition()
+        picked_actor = picker.GetActor()
+        
+        # STLモデル上をクリックしたかどうかを確認（座標設定には使用しない）
+        on_stl_surface = (pick_result and picked_actor == self.stl_actor)
+        
+        # カメラ情報を取得
+        camera = self.renderer.GetActiveCamera()
+        camera_pos = np.array(camera.GetPosition())
+        focal_point = np.array(camera.GetFocalPoint())
+        view_direction = focal_point - camera_pos
+        view_direction /= np.linalg.norm(view_direction)
+        
+        # カメラの視線方向に最も近い軸を特定（その軸の座標を維持する）
+        abs_view = np.abs(view_direction)
+        max_axis = np.argmax(abs_view)  # 0=X, 1=Y, 2=Z
+        
+        # 現在のポイント座標を取得
+        current_coords = self.point_coords[index].copy()
+        
+        # スクリーン座標から3D空間の線（レイ）を計算
+        # near平面とfar平面の2点を取得
+        coordinate = vtk.vtkCoordinate()
+        coordinate.SetCoordinateSystemToDisplay()
+        
+        # near平面の点
+        coordinate.SetValue(x, y, 0)
+        near_point = np.array(coordinate.GetComputedWorldValue(self.renderer))
+        
+        # far平面の点
+        coordinate.SetValue(x, y, 1)
+        far_point = np.array(coordinate.GetComputedWorldValue(self.renderer))
+        
+        # レイの方向
+        ray_direction = far_point - near_point
+        ray_direction /= np.linalg.norm(ray_direction)
+        
+        # 固定軸と平面の交点を計算
+        # 平面の方程式: axis_value = current_coords[max_axis]
+        # レイの方程式: point = near_point + t * ray_direction
+        if abs(ray_direction[max_axis]) > 1e-6:
+            t = (current_coords[max_axis] - near_point[max_axis]) / ray_direction[max_axis]
+            new_pos = near_point + t * ray_direction
+        else:
+            # レイが平面に平行な場合は、現在位置を維持
+            new_pos = current_coords.copy()
+        
+        # 固定軸の座標を確実に維持
+        new_pos[max_axis] = current_coords[max_axis]
+        
+        self.point_coords[index] = [new_pos[0], new_pos[1], new_pos[2]]
+        self.update_point_display(index)
+        
+        # ログ出力
+        axis_names = ['X', 'Y', 'Z']
+        location = "on STL" if on_stl_surface else "off STL"
+        print(f"[Ctrl+Click] Point {index+1} set ({location}, fixed {axis_names[max_axis]}): ({new_pos[0]:.6f}, {new_pos[1]:.6f}, {new_pos[2]:.6f})")
+
     def update_inertia_from_mass(self, mass):
         # イナーシャを重さから計算する例（適宜調整してください）
         inertia = mass * 0.1  # 例として、重さの0.1倍をイナーシャとする
@@ -766,20 +944,32 @@ class MainWindow(QMainWindow):
             if prop in values:
                 input_field.setText(f"{values[prop]:.12f}")
 
-    def update_point_display(self, index):
-        """ポイントの表示を更新（チェック状態の確認を追加）"""
-        if self.point_actors[index]:
-            if self.point_checkboxes[index].isChecked():
-                self.point_actors[index].SetPosition(self.point_coords[index])
-                self.point_actors[index].VisibilityOn()
-            else:
-                self.point_actors[index].VisibilityOff()
+    def update_point_actor(self, index):
+        """ポイントの3D表示のみを更新（入力フィールドは更新しない）"""
+        # アクターが存在し、チェックボックスがオンの場合のみ位置を更新
+        if self.point_actors[index] and self.point_checkboxes[index].isChecked():
+            self.point_actors[index].SetPosition(self.point_coords[index])
+            # アクターがレンダラーに追加されているか確認
+            if not self.renderer.HasViewProp(self.point_actors[index]):
+                self.renderer.AddActor(self.point_actors[index])
+            self.point_actors[index].VisibilityOn()
+        elif self.point_actors[index] and not self.point_checkboxes[index].isChecked():
+            # チェックボックスがオフの場合は非表示
+            self.point_actors[index].VisibilityOff()
+            if self.renderer.HasViewProp(self.point_actors[index]):
                 self.renderer.RemoveActor(self.point_actors[index])
         
+        self.render_window.Render()
+    
+    def update_point_inputs(self, index):
+        """入力フィールドの値のみを更新（3D表示は更新しない）"""
         for i, coord in enumerate(self.point_coords[index]):
             self.point_inputs[index][i].setText(f"{coord:.6f}")
-        
-        self.render_window.Render()
+    
+    def update_point_display(self, index):
+        """ポイントの3D表示と入力フィールドの両方を更新"""
+        self.update_point_actor(index)
+        self.update_point_inputs(index)
 
     def update_all_points_size(self, obj=None, event=None):
         """ポイントのサイズを更新（可視性の厳密な管理を追加）"""
@@ -1277,6 +1467,13 @@ class MainWindow(QMainWindow):
             with open(urdf_file_path, "w") as f:
                 f.write(urdf_content)
             print(f"URDF file saved: {urdf_file_path}")
+            
+            # タブ間連携: ファイル保存シグナルを発行
+            if hasattr(self, 'file_saved'):
+                self.file_saved.emit(self.stl_file_path, urdf_file_path)
+            if self.event_bus:
+                self.event_bus.file_saved.emit(self.stl_file_path, urdf_file_path)
+                self.event_bus.status_message.emit(f"Saved: {os.path.basename(urdf_file_path)}")
 
         except Exception as e:
             print(f"Error during URDF export: {str(e)}")
@@ -1595,21 +1792,6 @@ class MainWindow(QMainWindow):
             self.point_actors[index].VisibilityOff()
         self.render_window.Render()
 
-    def set_point(self, index):
-        try:
-            x = float(self.point_inputs[index][0].text())
-            y = float(self.point_inputs[index][1].text())
-            z = float(self.point_inputs[index][2].text())
-            self.point_coords[index] = [x, y, z]
-
-            if self.point_checkboxes[index].isChecked():
-                self.show_point(index)
-            else:
-                self.update_point_display(index)
-
-            print(f"Point {index+1} set to: ({x}, {y}, {z})")
-        except ValueError:
-            print(f"Invalid input for Point {index+1}. Please enter valid numbers for coordinates.")
 
     def move_point(self, index, dx, dy, dz):
         new_position = [
@@ -1632,10 +1814,6 @@ class MainWindow(QMainWindow):
         self.update_point_display(index)
         print(f"Point {index+1} moved to: ({new_position[0]:.6f}, {new_position[1]:.6f}, {new_position[2]:.6f})")
         
-    def update_all_points(self):
-        for i in range(self.num_points):
-            if self.point_actors[i]:
-                self.update_point_display(i)
 
     def fit_camera_to_model(self):
         """STLモデルが画面にフィットするようにカメラの距離のみを調整"""
@@ -2492,7 +2670,7 @@ class MainWindow(QMainWindow):
                     try:
                         # 座標テキストを分割して数値に変換
                         x, y, z = map(float, xyz_element.text.strip().split())
-                        print(f"Point {i+1}: {x}, {y}, z")
+                        print(f"Point {i+1}: {x}, {y}, {z}")
 
                         # テキストフィールドに値を設定
                         self.point_inputs[i][0].setText(f"{x:.6f}")
@@ -3158,8 +3336,14 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     apply_dark_theme(app)
 
-    window = MainWindow()
-    window.show()
+    # 単体起動時はQMainWindowとして表示
+    main_window = QMainWindow()
+    main_window.setWindowTitle("URDF Kitchen - PartsEditor v0.0.1 -")
+    main_window.setGeometry(0, 0, 1200, 600)
+    
+    widget = MainWidget()
+    main_window.setCentralWidget(widget)
+    main_window.show()
 
     # タイマーを設定してシグナルを処理できるようにする
     timer = QTimer()

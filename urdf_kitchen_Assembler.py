@@ -1447,6 +1447,7 @@ class STLViewerWidget(QtWidgets.QWidget):
         self.transforms = {}
         self.base_connected_node = None
         self.text_actors = []
+        self._cleaned_up = False  # クリーンアップフラグ
 
         layout = QtWidgets.QVBoxLayout(self)
         self.vtkWidget = QVTKRenderWindowInteractor(self)
@@ -1871,35 +1872,61 @@ class STLViewerWidget(QtWidgets.QWidget):
 
     def cleanup(self):
         """STLビューアのリソースをクリーンアップ"""
+        # 既にクリーンアップ済みの場合は何もしない
+        if self._cleaned_up:
+            return
+        
+        self._cleaned_up = True
+        
         # VTKオブジェクトの解放
-        if hasattr(self, 'renderer'):
-            if self.renderer:
+        if hasattr(self, 'renderer') and self.renderer:
+            try:
                 # アクターの削除
                 for actor in self.renderer.GetActors():
                     self.renderer.RemoveActor(actor)
                 
                 # テキストアクターの削除
-                for actor in self.text_actors:
-                    self.renderer.RemoveActor(actor)
-                self.text_actors.clear()
+                if hasattr(self, 'text_actors'):
+                    for actor in self.text_actors:
+                        self.renderer.RemoveActor(actor)
+                    self.text_actors.clear()
+            except (RuntimeError, AttributeError):
+                pass
 
         # インタラクターの終了
-        if hasattr(self, 'iren'):
-            if self.iren:
+        if hasattr(self, 'iren') and self.iren:
+            try:
                 self.iren.TerminateApp()
+            except (RuntimeError, AttributeError):
+                pass
 
-        # レンダーウィンドウのクリーンアップ
-        if hasattr(self, 'vtkWidget'):
-            if self.vtkWidget:
-                self.vtkWidget.close()
+        # レンダーウィンドウのFinalize
+        if hasattr(self, 'vtkWidget') and self.vtkWidget:
+            try:
+                render_win = self.vtkWidget.GetRenderWindow()
+                if render_win:
+                    render_win.Finalize()
+                self.vtkWidget.Finalize()
+            except (RuntimeError, AttributeError):
+                pass  # C++オブジェクトが既に削除されている場合は無視
 
         # 参照の解放
-        self.stl_actors.clear()
-        self.transforms.clear()
+        if hasattr(self, 'stl_actors'):
+            self.stl_actors.clear()
+        if hasattr(self, 'transforms'):
+            self.transforms.clear()
+        
+        # 明示的にNoneを設定
+        self.renderer = None
+        self.iren = None
+        self.vtkWidget = None
 
     def __del__(self):
         """デストラクタでクリーンアップを実行"""
-        self.cleanup()
+        try:
+            self.cleanup()
+        except (RuntimeError, AttributeError):
+            pass  # オブジェクトが既に削除されている場合は無視
 
     def update_rotation_axis(self, node, axis_id):
         """ノードの回転軸を更新"""
@@ -1949,13 +1976,14 @@ class STLViewerWidget(QtWidgets.QWidget):
         QtGui.QDesktopServices.openUrl(url)
 
 class CustomNodeGraph(NodeGraph):
-    def __init__(self, stl_viewer):
-        super(CustomNodeGraph, self).__init__()
+    def __init__(self, stl_viewer, parent=None):
+        super(CustomNodeGraph, self).__init__(parent=parent)
         self.stl_viewer = stl_viewer
         self.robot_name = "robot_x"
         self.project_dir = None
         self.meshes_dir = None
         self.last_save_dir = None
+        self.last_meshes_folder = None  # 最後に選択したmeshesフォルダを保存
 
         # ノードタイプの登録
         self.register_node(BaseLinkNode)
@@ -2090,67 +2118,59 @@ class CustomNodeGraph(NodeGraph):
 
     def cleanup(self):
         """リソースのクリーンアップ"""
+        # 既にクリーンアップ済みの場合は何もしない
+        if hasattr(self, '_cleaned_up') and self._cleaned_up:
+            return
+        
         try:
-            print("Starting cleanup process...")
+            self._cleaned_up = True  # クリーンアップ開始フラグ
             
             # イベントハンドラの復元
             if hasattr(self, '_view') and self._view:
-                if hasattr(self, '_original_handlers'):
-                    self._view.mousePressEvent = self._original_handlers['press']
-                    self._view.mouseMoveEvent = self._original_handlers['move']
-                    self._view.mouseReleaseEvent = self._original_handlers['release']
-                    print("Restored original event handlers")
+                try:
+                    if hasattr(self, '_original_handlers'):
+                        self._view.mousePressEvent = self._original_handlers['press']
+                        self._view.mouseMoveEvent = self._original_handlers['move']
+                        self._view.mouseReleaseEvent = self._original_handlers['release']
+                except (RuntimeError, AttributeError):
+                    pass  # C++オブジェクトが既に削除されている
 
             # ラバーバンドのクリーンアップ
-            try:
-                if hasattr(self, '_rubber_band') and self._rubber_band and not self._rubber_band.isHidden():
+            if hasattr(self, '_rubber_band') and self._rubber_band:
+                try:
                     self._rubber_band.hide()
                     self._rubber_band.setParent(None)
                     self._rubber_band.deleteLater()
-                    self._rubber_band = None
-                    print("Cleaned up rubber band")
-            except Exception as e:
-                print(f"Warning: Rubber band cleanup - {str(e)}")
+                except (RuntimeError, AttributeError):
+                    pass  # C++オブジェクトが既に削除されている
+                self._rubber_band = None
                 
-            # ノードのクリーンアップ
-            for node in self.all_nodes():
-                try:
-                    # STLデータのクリーンアップ
-                    if self.stl_viewer:
-                        self.stl_viewer.remove_stl_for_node(node)
-                    # ノードの削除
-                    self.remove_node(node)
-                except Exception as e:
-                    print(f"Error cleaning up node: {str(e)}")
-
             # インスペクタウィンドウのクリーンアップ
             if hasattr(self, 'inspector_window') and self.inspector_window:
                 try:
                     self.inspector_window.close()
                     self.inspector_window.deleteLater()
-                    self.inspector_window = None
-                    print("Cleaned up inspector window")
-                except Exception as e:
-                    print(f"Error cleaning up inspector window: {str(e)}")
+                except (RuntimeError, AttributeError):
+                    pass  # C++オブジェクトが既に削除されている
+                self.inspector_window = None
 
             # キャッシュのクリア
-            try:
+            if hasattr(self, '_cached_positions'):
                 self._cached_positions.clear()
+            if hasattr(self, '_selection_cache'):
                 self._selection_cache.clear()
-                if hasattr(self, '_cleanup_handlers'):
-                    self._cleanup_handlers.clear()
-                print("Cleared caches")
-            except Exception as e:
-                print(f"Error clearing caches: {str(e)}")
-
-            print("Cleanup process completed")
+            if hasattr(self, '_cleanup_handlers'):
+                self._cleanup_handlers.clear()
 
         except Exception as e:
-            print(f"Error during cleanup: {str(e)}")
+            pass  # クリーンアップエラーは無視
 
     def __del__(self):
         """デストラクタでクリーンアップを実行"""
-        self.cleanup()
+        try:
+            self.cleanup()
+        except (RuntimeError, AttributeError):
+            pass  # オブジェクトが既に削除されている場合は無視
 
     def remove_node(self, node):
         """ノード削除時のメモリリーク対策"""
@@ -3545,7 +3565,173 @@ class CustomNodeGraph(NodeGraph):
             return
 
         print(f"Importing XMLs from folder: {folder_path}")
+        
+        # 既存のノード(BaseLinkNode以外)をクリア
+        print("Clearing existing nodes...")
+        
+        # 接続情報を保存
+        saved_connections = self._save_connections()
+        print(f"Saved {len(saved_connections)} connection(s)")
+        
+        nodes_to_remove = [node for node in self.all_nodes() if not isinstance(node, BaseLinkNode)]
+        for node in nodes_to_remove:
+            self.remove_node(node)
+        print(f"Removed {len(nodes_to_remove)} existing node(s)")
+        
+        # 最後に選択したフォルダを記憶
+        self.last_meshes_folder = folder_path
+        
+        # 内部メソッドを呼び出してXMLをロード
+        self._load_xmls_from_path(folder_path)
+        
+        # 接続情報を復元
+        restored_count = self._restore_connections(saved_connections)
+        print(f"Restored {restored_count} connection(s)")
 
+    def clear_all_nodes(self):
+        """BaseLinkNode以外のすべてのノードをクリア"""
+        print("Clearing all nodes...")
+        nodes_to_remove = [node for node in self.all_nodes() if not isinstance(node, BaseLinkNode)]
+        for node in nodes_to_remove:
+            self.remove_node(node)
+        print(f"Cleared {len(nodes_to_remove)} node(s)")
+        
+        # 3Dビューもクリア
+        if self.stl_viewer:
+            self.stl_viewer.clear_all_models()
+            print("Cleared 3D view")
+
+    def refresh_parts(self):
+        """現在設定されているフォルダから部品を再読み込み"""
+        if not hasattr(self, 'last_meshes_folder') or not self.last_meshes_folder:
+            print("No folder has been set yet. Please use 'Import XMLs' first.")
+            QtWidgets.QMessageBox.warning(
+                None,
+                "No Folder Set",
+                "Please select a folder using 'Import XMLs' button first."
+            )
+            return
+        
+        if not os.path.exists(self.last_meshes_folder):
+            print(f"Previously set folder no longer exists: {self.last_meshes_folder}")
+            QtWidgets.QMessageBox.warning(
+                None,
+                "Folder Not Found",
+                f"The previously set folder no longer exists:\n{self.last_meshes_folder}"
+            )
+            return
+        
+        print(f"Refreshing parts from folder: {self.last_meshes_folder}")
+        
+        # 接続情報を保存
+        saved_connections = self._save_connections()
+        print(f"Saved {len(saved_connections)} connection(s)")
+        
+        # 既存のノードをクリア
+        nodes_to_remove = [node for node in self.all_nodes() if not isinstance(node, BaseLinkNode)]
+        for node in nodes_to_remove:
+            self.remove_node(node)
+        print(f"Removed {len(nodes_to_remove)} existing node(s)")
+        
+        # フォルダから再読み込み
+        self._load_xmls_from_path(self.last_meshes_folder)
+        
+        # 接続情報を復元
+        restored_count = self._restore_connections(saved_connections)
+        print(f"Restored {restored_count} connection(s)")
+
+    def _save_connections(self):
+        """現在のノード間の接続情報を保存"""
+        connections = []
+        
+        for node in self.all_nodes():
+            node_name = node.name()
+            
+            # 各出力ポートの接続を保存
+            for output_port in node.output_ports():
+                output_port_name = output_port.name()
+                
+                # 接続されている全てのポートを確認
+                for connected_port in output_port.connected_ports():
+                    connected_node = connected_port.node()
+                    connected_port_name = connected_port.name()
+                    
+                    # 接続情報を保存（ノード名とポート名）
+                    connection_info = {
+                        'source_node': node_name,
+                        'source_port': output_port_name,
+                        'target_node': connected_node.name(),
+                        'target_port': connected_port_name
+                    }
+                    connections.append(connection_info)
+                    print(f"Saved connection: {node_name}.{output_port_name} -> {connected_node.name()}.{connected_port_name}")
+        
+        return connections
+
+    def _restore_connections(self, saved_connections):
+        """保存された接続情報を復元"""
+        if not saved_connections:
+            return 0
+        
+        restored_count = 0
+        
+        # ノード名でノードを検索できるようにマッピングを作成
+        node_map = {node.name(): node for node in self.all_nodes()}
+        
+        for conn in saved_connections:
+            try:
+                source_node_name = conn['source_node']
+                source_port_name = conn['source_port']
+                target_node_name = conn['target_node']
+                target_port_name = conn['target_port']
+                
+                # ノードを取得
+                source_node = node_map.get(source_node_name)
+                target_node = node_map.get(target_node_name)
+                
+                if not source_node:
+                    print(f"Warning: Source node '{source_node_name}' not found")
+                    continue
+                
+                if not target_node:
+                    print(f"Warning: Target node '{target_node_name}' not found")
+                    continue
+                
+                # ポートを取得
+                source_port = None
+                for port in source_node.output_ports():
+                    if port.name() == source_port_name:
+                        source_port = port
+                        break
+                
+                target_port = None
+                for port in target_node.input_ports():
+                    if port.name() == target_port_name:
+                        target_port = port
+                        break
+                
+                if not source_port:
+                    print(f"Warning: Source port '{source_port_name}' not found on node '{source_node_name}'")
+                    continue
+                
+                if not target_port:
+                    print(f"Warning: Target port '{target_port_name}' not found on node '{target_node_name}'")
+                    continue
+                
+                # 接続を復元
+                source_port.connect_to(target_port)
+                restored_count += 1
+                print(f"Restored connection: {source_node_name}.{source_port_name} -> {target_node_name}.{target_port_name}")
+                
+            except Exception as e:
+                print(f"Error restoring connection: {str(e)}")
+                traceback.print_exc()
+                continue
+        
+        return restored_count
+
+    def _load_xmls_from_path(self, folder_path):
+        """指定されたパスからXMLファイルを読み込む(内部メソッド)"""
         # フォルダ名からロボット名を抽出
         try:
             # 2つ上のディレクトリのパスを取得
@@ -3727,7 +3913,7 @@ class CustomNodeGraph(NodeGraph):
                 traceback.print_exc()
                 continue
 
-        print("\nImport process completed")
+        print("\nLoad process completed")
 
     def recalculate_all_positions(self):
         """すべてのノードの位置を再計算"""
@@ -4419,6 +4605,192 @@ def center_window_top_left(window):
     window.move(0, 0)
 
 
+class MainWidget(QtWidgets.QWidget):
+    """Assembler用のメインウィジェット（タブ統合用）"""
+    
+    def __init__(self, event_bus=None, parent=None):
+        super().__init__(parent)
+        # タブ統合用のイベントバス
+        self.event_bus = event_bus
+        # クリーンアップフラグ
+        self._cleaned_up = False
+        
+        # ボタンのスタイルを設定
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                stop:0 #5a5a5a, stop:1 #3a3a3a);
+                color: #ffffff;
+                border: 1px solid #707070;
+                border-radius: 5px;
+                padding: 1px 6px;
+                min-height: 18px;
+            }
+            QPushButton:hover {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                stop:0 #6a6a6a, stop:1 #4a4a4a);
+            }
+            QPushButton:pressed {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                stop:0 #3a3a3a, stop:1 #5a5a5a);
+                padding-top: 6px;
+                padding-bottom: 4px;
+            }
+        """)
+        
+        # メインレイアウトの設定
+        main_layout = QtWidgets.QHBoxLayout(self)
+        
+        # STLビューアとグラフの設定（先に作成）
+        self.stl_viewer = STLViewerWidget(self)
+        self.graph = CustomNodeGraph(self.stl_viewer, parent=self)
+        self.graph.setup_custom_view()
+        
+        # base_linkノードの作成
+        base_node = self.graph.create_base_link()
+        
+        # 左パネルの設定
+        left_panel = QtWidgets.QWidget()
+        left_panel.setFixedWidth(145)
+        left_layout = QtWidgets.QVBoxLayout(left_panel)
+        
+        # 名前入力フィールドの設定
+        name_label = QtWidgets.QLabel("Name:")
+        left_layout.addWidget(name_label)
+        self.name_input = QtWidgets.QLineEdit("robot_x")
+        self.name_input.setFixedWidth(120)
+        self.name_input.setStyleSheet("QLineEdit { padding-left: 3px; padding-top: 0px; padding-bottom: 0px; }")
+        left_layout.addWidget(self.name_input)
+        
+        # 名前入力フィールドとグラフを接続
+        self.name_input.textChanged.connect(self.graph.update_robot_name)
+        
+        # ボタンの作成と設定
+        buttons = {
+            "--spacer1--": None,
+            "Import XMLs": None,
+            "Refresh": None,
+            "Clear Nodes": None,
+            "--spacer2--": None,
+            "Add Node": None,
+            "Delete Node": None,
+            "Recalc Positions": None,
+            "--spacer3--": None,
+            "Load Project": None,
+            "Save Project": None,
+            "--spacer4--": None,
+            "Export URDF": None,
+            "Export for Unity": None,
+            "--spacer5--": None,
+            "open urdf-loaders": None
+        }
+        
+        self.buttons = {}
+        for button_text in buttons.keys():
+            if button_text.startswith("--spacer"):
+                spacer = QtWidgets.QWidget()
+                spacer.setFixedHeight(1)
+                left_layout.addWidget(spacer)
+            else:
+                button = QtWidgets.QPushButton(button_text)
+                button.setFixedWidth(120)
+                left_layout.addWidget(button)
+                self.buttons[button_text] = button
+        
+        left_layout.addStretch()
+        
+        # ボタンのコネクション設定
+        self.buttons["Import XMLs"].clicked.connect(self.graph.import_xmls_from_folder)
+        self.buttons["Refresh"].clicked.connect(self.graph.refresh_parts)
+        self.buttons["Clear Nodes"].clicked.connect(self.graph.clear_all_nodes)
+        self.buttons["Add Node"].clicked.connect(
+            lambda: self.graph.create_node(
+                'insilico.nodes.FooNode',
+                name=f'Node_{len(self.graph.all_nodes())}',
+                pos=QtCore.QPointF(0, 0)
+            )
+        )
+        self.buttons["Delete Node"].clicked.connect(
+            lambda: self.delete_selected_node())
+        self.buttons["Recalc Positions"].clicked.connect(
+            self.graph.recalculate_all_positions)
+        self.buttons["Save Project"].clicked.connect(self.graph.save_project)
+        self.buttons["Load Project"].clicked.connect(lambda: self.load_project())
+        self.buttons["Export URDF"].clicked.connect(lambda: self.graph.export_urdf())
+        self.buttons["Export for Unity"].clicked.connect(self.graph.export_for_unity)
+        self.buttons["open urdf-loaders"].clicked.connect(
+            lambda: QtGui.QDesktopServices.openUrl(
+                QtCore.QUrl(
+                    "https://gkjohnson.github.io/urdf-loaders/javascript/example/bundle/")
+            )
+        )
+        
+        # スプリッターの設定
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        splitter.addWidget(self.graph.widget)
+        splitter.addWidget(self.stl_viewer)
+        splitter.setSizes([800, 400])
+        
+        # メインレイアウトの設定
+        main_layout.addWidget(left_panel)
+        main_layout.addWidget(splitter)
+        
+        # グラフに名前入力フィールドを関連付け
+        self.graph.name_input = self.name_input
+        
+        # イベントバスとの連携
+        if self.event_bus:
+            self.event_bus.file_saved.connect(self.on_file_reload_request)
+        
+        print("Assembler widget initialized")
+    
+    def delete_selected_node(self):
+        """選択されたノードを削除"""
+        selected_nodes = self.graph.selected_nodes()
+        if selected_nodes:
+            for node in selected_nodes:
+                if isinstance(node, BaseLinkNode):
+                    print("Cannot delete Base Link node")
+                    continue
+                self.graph.remove_node(node)
+            print(f"Deleted {len(selected_nodes)} node(s)")
+        else:
+            print("No node selected for deletion")
+    
+    def load_project(self):
+        """プロジェクトを読み込み"""
+        load_project(self.graph)
+    
+    def on_file_reload_request(self, stl_path, xml_path):
+        """PartsEditorからのファイル保存通知を受信してリロード"""
+        print(f"File reload request received: {xml_path}")
+        # 必要に応じて自動リロード処理を実装
+        if self.event_bus:
+            self.event_bus.status_message.emit(f"File updated: {os.path.basename(xml_path)}")
+    
+    def cleanup(self):
+        """クリーンアップ処理"""
+        # 既にクリーンアップ済みの場合は何もしない
+        if hasattr(self, '_cleaned_up') and self._cleaned_up:
+            return
+        
+        self._cleaned_up = True
+        
+        try:
+            if hasattr(self, 'graph') and self.graph:
+                try:
+                    self.graph.cleanup()
+                except (RuntimeError, AttributeError):
+                    pass  # C++オブジェクトが既に削除されている場合は無視
+            if hasattr(self, 'stl_viewer') and self.stl_viewer:
+                try:
+                    self.stl_viewer.cleanup()
+                except (RuntimeError, AttributeError):
+                    pass  # C++オブジェクトが既に削除されている場合は無視
+        except Exception:
+            pass  # その他のエラーも無視
+
+
 if __name__ == '__main__':
     try:
         # Ctrl+Cシグナルハンドラの設定
@@ -4476,6 +4848,8 @@ if __name__ == '__main__':
         buttons = {
             "--spacer1--": None,  # スペーサー用のダミーキー
             "Import XMLs": None,
+            "Refresh": None,
+            "Clear Nodes": None,
             "--spacer2--": None,  # スペーサー用のダミーキー
             "Add Node": None,
             "Delete Node": None,
@@ -4507,6 +4881,8 @@ if __name__ == '__main__':
 
         # ボタンのコネクション設定
         buttons["Import XMLs"].clicked.connect(graph.import_xmls_from_folder)
+        buttons["Refresh"].clicked.connect(graph.refresh_parts)
+        buttons["Clear Nodes"].clicked.connect(graph.clear_all_nodes)
         buttons["Add Node"].clicked.connect(
             lambda: graph.create_node(
                 'insilico.nodes.FooNode',
