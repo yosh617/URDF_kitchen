@@ -34,8 +34,10 @@ class CustomInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
     def __init__(self, parent=None):
         super(CustomInteractorStyle, self).__init__()
         self.parent = parent
+        self.last_click_time = 0  # 最後のクリック時刻を記録
         self.AddObserver("CharEvent", self.on_char_event)
         self.AddObserver("KeyPressEvent", self.on_key_press)
+        self.AddObserver("LeftButtonPressEvent", self.on_left_button_press)
 
     def on_char_event(self, obj, event):
         key = self.GetInteractor().GetKeySym()
@@ -108,14 +110,35 @@ class CustomInteractorStyle(vtk.vtkInteractorStyleTrackballCamera):
         actors = renderer.GetActors()
         actors.InitTraversal()
         actor = actors.GetNextItem()
+
         while actor:
-            if not actor.GetUserTransform():
+            # STLアクターの場合のみ表示モードを切り替える
+            if actor == self.parent.stl_actor:
                 if actor.GetProperty().GetRepresentation() == vtk.VTK_SURFACE:
                     actor.GetProperty().SetRepresentationToWireframe()
                 else:
                     actor.GetProperty().SetRepresentationToSurface()
             actor = actors.GetNextItem()
+        
         self.GetInteractor().GetRenderWindow().Render()
+    
+    def on_left_button_press(self, obj, event):
+        """Ctrl + 左クリックでポイントの座標を設定"""
+        if self.parent:
+            ctrl_pressed = self.GetInteractor().GetControlKey()
+            if ctrl_pressed:
+                # マウスの位置を取得
+                x, y = self.GetInteractor().GetEventPosition()
+                
+                # チェックされているポイントに座標を設定
+                for i, checkbox in enumerate(self.parent.point_checkboxes):
+                    if checkbox.isChecked():
+                        self.parent.set_point_from_click(i, x, y)
+                
+                return  # イベントを消費して通常のカメラ操作を防ぐ
+        
+        # Ctrlが押されていない場合は通常の動作
+        self.OnLeftButtonDown()
 
 
 class MainWidget(QWidget):
@@ -292,6 +315,11 @@ class MainWidget(QWidget):
             inputs = []
             for j, axis in enumerate(['X', 'Y', 'Z']):
                 input_field = QLineEdit(str(self.point_coords[i][j]))
+                
+                # 入力フィールドにイベントハンドラを接続
+                input_field.editingFinished.connect(lambda idx=i: self.update_point_from_input(idx))
+                input_field.returnPressed.connect(lambda idx=i: self.update_point_from_input(idx))
+                
                 inputs.append(input_field)
                 points_layout.addWidget(QLabel(f"{axis}:"), i, j*2+1)
                 points_layout.addWidget(input_field, i, j*2+2)
@@ -314,6 +342,28 @@ class MainWidget(QWidget):
         button_layout.addWidget(set_front_button)
 
         layout.addLayout(button_layout)
+
+    def update_point_from_input(self, index):
+        """入力フィールドから値を読み取ってポイント座標を更新"""
+        try:
+            x = float(self.point_inputs[index][0].text())
+            y = float(self.point_inputs[index][1].text())
+            z = float(self.point_inputs[index][2].text())
+            
+            # 値が変更されているかチェック
+            new_coords = [x, y, z]
+            if new_coords != self.point_coords[index]:
+                self.point_coords[index] = new_coords
+                
+                # 3D表示のみを更新（入力フィールドは更新しない）
+                self.update_point_display(index)
+                
+                print(f"Point {index+1} updated to: ({x:.6f}, {y:.6f}, {z:.6f})")
+        except ValueError:
+            # 無効な入力の場合は元の値に戻す
+            for j in range(3):
+                self.point_inputs[index][j].setText(f"{self.point_coords[index][j]:.6f}")
+            print(f"Invalid input for Point {index+1}. Reverting to previous value.")
 
     def set_point(self, index):
         try:
@@ -368,7 +418,111 @@ class MainWidget(QWidget):
                 self.point_coords[i] = list(self.absolute_origin)  # 原点にリセット
                 self.update_point_display(i)
                 print(f"Point {i+1} reset to origin {self.absolute_origin}")
+    
+    def move_point_screen(self, index, direction, step):
+        """スクリーン座標系に基づいてポイントを移動"""
+        move_vector = direction * step
+        new_position = [
+            self.point_coords[index][0] + move_vector[0],
+            self.point_coords[index][1] + move_vector[1],
+            self.point_coords[index][2] + move_vector[2]
+        ]
+        self.point_coords[index] = new_position
+        self.update_point_display(index)
+        print(f"Point {index+1} moved to: ({new_position[0]:.6f}, {new_position[1]:.6f}, {new_position[2]:.6f})")
 
+
+    def get_screen_axes(self):
+        """スクリーン座標系の軸を取得"""
+        camera = self.renderer.GetActiveCamera()
+        view_up = np.array(camera.GetViewUp())
+        forward = np.array(camera.GetDirectionOfProjection())
+        
+        # NumPyのベクトル演算を使用
+        right = np.cross(forward, view_up)
+        
+        screen_right = right
+        screen_up = view_up
+
+        # ドット積の計算にNumPyを使用
+        if abs(np.dot(screen_right, [1, 0, 0])) > abs(np.dot(screen_right, [0, 0, 1])):
+            horizontal_axis = 'x'
+            vertical_axis = 'z' if abs(np.dot(screen_up, [0, 0, 1])) > abs(np.dot(screen_up, [0, 1, 0])) else 'y'
+        else:
+            horizontal_axis = 'z'
+            vertical_axis = 'y'
+
+        return horizontal_axis, vertical_axis, screen_right, screen_up
+    
+    def set_point_from_click(self, index, x, y):
+        """Ctrl + クリックで3D空間のポイントに座標を設定"""
+        # VTKのCellPickerを使用（ワイヤーフレーム表示でも動作する）
+        picker = vtk.vtkCellPicker()
+        picker.SetTolerance(0.005)  # ピック範囲を広げる（デフォルト0.001）
+        
+        # STLアクターのみをピック対象に追加（ポイントの球体を除外）
+        if self.stl_actor:
+            picker.AddPickList(self.stl_actor)
+            picker.PickFromListOn()  # リストに追加されたアクターのみをピック対象にする
+        
+        pick_result = picker.Pick(x, y, 0, self.renderer)
+        
+        # ピックされた位置を取得
+        picked_pos = picker.GetPickPosition()
+        picked_actor = picker.GetActor()
+        
+        # STLモデル上をクリックしたかどうかを確認（座標設定には使用しない）
+        on_stl_surface = (pick_result and picked_actor == self.stl_actor)
+        
+        # カメラ情報を取得
+        camera = self.renderer.GetActiveCamera()
+        camera_pos = np.array(camera.GetPosition())
+        focal_point = np.array(camera.GetFocalPoint())
+        view_direction = focal_point - camera_pos
+        view_direction /= np.linalg.norm(view_direction)
+        
+        # カメラの視線方向に最も近い軸を特定（その軸の座標を維持する）
+        abs_view = np.abs(view_direction)
+        max_axis = np.argmax(abs_view)  # 0=X, 1=Y, 2=Z
+        
+        # 現在のポイント座標を取得
+        current_coords = self.point_coords[index].copy()
+        
+        # スクリーン座標から3D空間の線（レイ）を計算
+        # near平面とfar平面の2点を取得
+        coordinate = vtk.vtkCoordinate()
+        coordinate.SetCoordinateSystemToDisplay()
+        
+        # near平面の点
+        coordinate.SetValue(x, y, 0)
+        near_point = np.array(coordinate.GetComputedWorldValue(self.renderer))
+        
+        # far平面の点
+        coordinate.SetValue(x, y, 1)
+        far_point = np.array(coordinate.GetComputedWorldValue(self.renderer))
+        
+        # レイの方向
+        ray_direction = far_point - near_point
+        ray_direction /= np.linalg.norm(ray_direction)
+        
+        # 固定軸と平面の交点を計算
+        # 平面の方程式: axis_value = current_coords[max_axis]
+        # レイの方程式: point = near_point + t * ray_direction
+        if abs(ray_direction[max_axis]) > 1e-6:
+            t = (current_coords[max_axis] - near_point[max_axis]) / ray_direction[max_axis]
+            new_pos = near_point + t * ray_direction
+        else:
+            # レイが平面に平行な場合は、現在位置を維持
+            new_pos = current_coords.copy()
+        
+        # 固定軸の座標を確実に維持
+        new_pos[max_axis] = current_coords[max_axis]
+        
+        self.point_coords[index] = [new_pos[0], new_pos[1], new_pos[2]]
+        self.update_point_display(index)
+        
+        axis_names = ['X', 'Y', 'Z']
+        print(f"Point {index+1} set to: ({new_pos[0]:.6f}, {new_pos[1]:.6f}, {new_pos[2]:.6f}) - {axis_names[max_axis]} axis fixed")
 
     def reset_camera(self):
         """
@@ -700,6 +854,7 @@ class MainWidget(QWidget):
             "[Arrows] : Move Marker 10mm\n"
             "  +[Shift] : Move Marker 1mm\n"
             "   +[Ctrl] : Move Marker 0.1mm\n"
+            "[Ctrl+Click]: Set Marker Position\n"
         )
         text_actor_bottom.GetTextProperty().SetFontSize(14)
         text_actor_bottom.GetTextProperty().SetColor(0.0, 0.8, 0.8)
@@ -907,18 +1062,6 @@ class MainWidget(QWidget):
         print(
             f"Point {index+1} moved to: ({new_position[0]:.4f}, {new_position[1]:.4f}, {new_position[2]:.4f})")
 
-    def move_point_screen(self, index, direction, step):
-        move_vector = direction * step
-        new_position = [
-            self.point_coords[index][0] + move_vector[0],
-            self.point_coords[index][1] + move_vector[1],
-            self.point_coords[index][2] + move_vector[2]
-        ]
-        self.point_coords[index] = new_position
-        self.update_point_display(index)
-        print(
-            f"Point {index+1} moved to: ({new_position[0]:.4f}, {new_position[1]:.4f}, {new_position[2]:.4f})")
-
     def fit_camera_to_model(self):
         if not self.model_bounds:
             return
@@ -964,28 +1107,32 @@ class MainWidget(QWidget):
         self.vtk_widget.close()
         event.accept()
 
-    def get_screen_axes(self):
-        camera = self.renderer.GetActiveCamera()
-        view_up = np.array(camera.GetViewUp())
-        forward = np.array(camera.GetDirectionOfProjection())
+    def handle_set_reset(self):
+        """Set/Resetボタンの処理"""
+        sender = self.sender()
+        is_set = sender.text() == "Set Marker"
 
-        # NumPyのベクトル演算を使用
-        right = np.cross(forward, view_up)
+        for i, checkbox in enumerate(self.point_checkboxes):
+            if checkbox.isChecked():
+                if is_set:
+                    try:
+                        new_coords = [float(self.point_inputs[i][j].text()) for j in range(3)]
+                        if new_coords != self.point_coords[i]:
+                            self.point_coords[i] = new_coords
+                            self.update_point_display(i)
+                            print(f"Point {i+1} set to: {new_coords}")
+                        else:
+                            print(f"Point {i+1} coordinates unchanged")
+                    except ValueError:
+                        print(f"Invalid input for Point {i+1}. Please enter valid numbers.")
+                else:  # Reset
+                    self.reset_point_to_origin(i)
 
-        screen_right = right
-        screen_up = view_up
+        if not is_set:
+            self.update_all_points_size()
 
-        # ドット積の計算にNumPyを使用
-        if abs(np.dot(screen_right, [1, 0, 0])) > abs(np.dot(screen_right, [0, 0, 1])):
-            horizontal_axis = 'x'
-            vertical_axis = 'z' if abs(np.dot(screen_up, [0, 0, 1])) > abs(
-                np.dot(screen_up, [0, 1, 0])) else 'y'
-        else:
-            horizontal_axis = 'z'
-            vertical_axis = 'y'
-
-        return horizontal_axis, vertical_axis, screen_right, screen_up
-
+        self.render_window.Render()
+    
     def export_stl_with_new_origin(self):
         if not self.stl_actor or not any(self.point_actors):
             print("STL model or points are not set.")
