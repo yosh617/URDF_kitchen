@@ -35,7 +35,8 @@ from Qt import QtWidgets, QtCore, QtGui
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QMainWindow, QVBoxLayout, QWidget, 
     QPushButton, QHBoxLayout, QCheckBox, QLineEdit, QLabel, QGridLayout,
-    QTextEdit, QButtonGroup, QRadioButton, QColorDialog, QDialog, QMessageBox
+    QTextEdit, QButtonGroup, QRadioButton, QColorDialog, QDialog, QMessageBox,
+    QListWidget, QGroupBox
 )
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QTextOption, QColor, QPalette
@@ -353,6 +354,12 @@ class MainWidget(QWidget):
         self.point_reset_buttons = []
 
         self.com_actor = None  # 重心アクターを追跡するための新しい属性
+        
+        # プロジェクト管理（部品一覧用）
+        self.project = None
+        self.stl_dir = None
+        self.parts_dir = None
+        self.parts_list_dict = {}  # {part_name: {stl_file, xml_file}}
 
         main_layout = QVBoxLayout(self)  # 垂直方向のレイアウトに変更
 
@@ -431,6 +438,7 @@ class MainWidget(QWidget):
             pass
 
     def setup_ui(self):
+        self.setup_parts_list_ui()  # 部品リスト表示を追加
         self.setup_buttons()
         self.setup_stl_properties_ui()
         self.setup_points_ui()
@@ -495,6 +503,115 @@ class MainWidget(QWidget):
         button_layout.addWidget(self.export_stl_button)
 
         self.left_layout.addLayout(button_layout)
+    
+    def setup_parts_list_ui(self):
+        """部品一覧表示UIを作成"""
+        # 部品リストグループボックス
+        parts_group = QtWidgets.QGroupBox("Parts List")
+        parts_layout = QVBoxLayout(parts_group)
+        
+        # リストウィジェット
+        self.parts_list_widget = QtWidgets.QListWidget()
+        self.parts_list_widget.itemClicked.connect(self.on_part_selected)
+        self.parts_list_widget.setMaximumHeight(150)
+        parts_layout.addWidget(self.parts_list_widget)
+        
+        # ボタンレイアウト
+        btn_layout = QHBoxLayout()
+        
+        # 更新ボタン
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.refresh_parts_list)
+        btn_layout.addWidget(refresh_btn)
+        
+        # 読み込みボタン
+        load_selected_btn = QPushButton("Load Selected")
+        load_selected_btn.clicked.connect(self.load_selected_part)
+        btn_layout.addWidget(load_selected_btn)
+        
+        parts_layout.addLayout(btn_layout)
+        
+        self.left_layout.addWidget(parts_group)
+    
+    def refresh_parts_list(self):
+        """プロジェクトのparts/ディレクトリから部品リストを更新"""
+        self.parts_list_widget.clear()
+        self.parts_list_dict.clear()
+        
+        # 現在のディレクトリから parts/ を探す
+        current_dir = os.getcwd()
+        parts_dir = os.path.join(current_dir, "parts")
+        
+        if not os.path.exists(parts_dir):
+            # meshes/ からプロジェクトルートを探す
+            if os.path.exists(os.path.join(current_dir, "meshes")):
+                parts_dir = os.path.join(current_dir, "parts")
+                if not os.path.exists(parts_dir):
+                    print(f"Parts directory not found: {parts_dir}")
+                    return
+        
+        # XMLファイルを探す
+        if os.path.exists(parts_dir):
+            for filename in os.listdir(parts_dir):
+                if filename.endswith('.xml'):
+                    part_name = filename[:-4]  # .xml を除去
+                    xml_path = os.path.join(parts_dir, filename)
+                    
+                    # 対応するSTLファイルを探す
+                    stl_dir = os.path.join(current_dir, "stl")
+                    stl_path = os.path.join(stl_dir, f"{part_name}.stl")
+                    
+                    if not os.path.exists(stl_path):
+                        # meshes/ ディレクトリも確認
+                        meshes_dir = os.path.join(current_dir, "meshes")
+                        stl_path = os.path.join(meshes_dir, f"{part_name}.stl")
+                    
+                    self.parts_list_dict[part_name] = {
+                        'stl_file': stl_path if os.path.exists(stl_path) else None,
+                        'xml_file': xml_path
+                    }
+                    self.parts_list_widget.addItem(part_name)
+        
+        print(f"Found {len(self.parts_list_dict)} parts in {parts_dir}")
+    
+    def on_part_selected(self, item):
+        """部品がリストから選択されたとき"""
+        part_name = item.text()
+        print(f"Part selected: {part_name}")
+    
+    def load_selected_part(self):
+        """選択された部品を読み込む"""
+        current_item = self.parts_list_widget.currentItem()
+        if not current_item:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Warning",
+                "Please select a part from the list."
+            )
+            return
+        
+        part_name = current_item.text()
+        part_data = self.parts_list_dict.get(part_name)
+        
+        if not part_data:
+            return
+        
+        # STLファイルを読み込む
+        if part_data['stl_file'] and os.path.exists(part_data['stl_file']):
+            self.load_stl_file_path(part_data['stl_file'])
+        
+        # XMLファイルを読み込む
+        if part_data['xml_file'] and os.path.exists(part_data['xml_file']):
+            self.load_xml_file_path(part_data['xml_file'])
+        
+        print(f"Loaded part: {part_name}")
+    
+    def load_parts_list(self, parts):
+        """外部から部品リストを読み込む（互換性用）"""
+        self.parts_list_dict = parts
+        self.parts_list_widget.clear()
+        for part_name in parts.keys():
+            self.parts_list_widget.addItem(part_name)
 
     def setup_stl_properties_ui(self):
         grid_layout = QGridLayout()
@@ -1605,6 +1722,12 @@ class MainWidget(QWidget):
         if file_path:
             self.file_name_value.setText(file_path)
             self.show_stl(file_path)
+    
+    def load_stl_file_path(self, file_path):
+        """指定されたパスのSTLファイルを直接読み込む（部品リストから使用）"""
+        if file_path and os.path.exists(file_path):
+            self.file_name_value.setText(file_path)
+            self.show_stl(file_path)
 
     def show_stl(self, file_path):
         #古いアクターを削除
@@ -2629,6 +2752,18 @@ class MainWidget(QWidget):
         try:
             xml_path, _ = QFileDialog.getOpenFileName(self, "Open XML File", "", "XML Files (*.xml)")
             if not xml_path:
+                return
+
+            self.load_xml_file_path(xml_path)
+
+        except Exception as e:
+            print(f"An error occurred while loading the XML file: {str(e)}")
+            traceback.print_exc()
+    
+    def load_xml_file_path(self, xml_path):
+        """指定されたパスのXMLファイルを直接読み込む（部品リストから使用）"""
+        try:
+            if not xml_path or not os.path.exists(xml_path):
                 return
 
             # XMLファイルを解析

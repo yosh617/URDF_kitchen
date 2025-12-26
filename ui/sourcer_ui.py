@@ -99,6 +99,10 @@ class STLSourcerWidget(QtWidgets.QWidget):
         # STL アクター
         self.stl_actor = None
         
+        # 原点球アクター
+        self.origin_sphere_actor = None
+        self.add_origin_sphere()
+        
         layout.addWidget(self.vtk_render_widget)
         
         # ツールバー
@@ -387,6 +391,15 @@ class STLSourcerWidget(QtWidgets.QWidget):
                 self.has_unsaved_changes = False
                 print(f"STL loaded successfully, polydata: {self.processor.polydata}")
                 self.update_3d_view()
+                
+                # 座標軸と原点球のサイズを更新
+                self.add_origin_axes()
+                
+                # 原点球を再作成（サイズ更新）
+                if self.origin_sphere_actor:
+                    self.renderer.RemoveActor(self.origin_sphere_actor)
+                self.add_origin_sphere()
+                
                 self.update_info_display()
                 part_name = Path(file_path).stem
                 self.info_label.setText(f"{tr('loaded')}: {Path(file_path).name}")
@@ -470,7 +483,9 @@ class STLSourcerWidget(QtWidgets.QWidget):
         ty = self.ty_spin.value()
         tz = self.tz_spin.value()
         
-        self.processor.apply_translation(tx, ty, tz)
+        # numpy配列として渡す
+        translation = np.array([tx, ty, tz])
+        self.processor.apply_translation(translation)
         self.has_unsaved_changes = True
         self.update_3d_view()
         self.update_info_display()
@@ -489,7 +504,14 @@ class STLSourcerWidget(QtWidgets.QWidget):
         ry = self.ry_spin.value()
         rz = self.rz_spin.value()
         
-        self.processor.apply_rotation(rx, ry, rz)
+        # 各軸ごとに回転を適用
+        if rx != 0:
+            self.processor.apply_rotation(rx, 'x')
+        if ry != 0:
+            self.processor.apply_rotation(ry, 'y')
+        if rz != 0:
+            self.processor.apply_rotation(rz, 'z')
+        
         self.has_unsaved_changes = True
         self.update_3d_view()
         self.update_info_display()
@@ -505,7 +527,7 @@ class STLSourcerWidget(QtWidgets.QWidget):
             return
         
         scale = self.scale_spin.value()
-        self.processor.apply_scale(scale, scale, scale)
+        self.processor.apply_scale(scale)
         self.has_unsaved_changes = True
         self.update_3d_view()
         self.update_info_display()
@@ -599,12 +621,57 @@ class STLSourcerWidget(QtWidgets.QWidget):
         
         self.vtk_render_widget.GetRenderWindow().Render()
     
+    def add_origin_sphere(self):
+        """原点に球を追加"""
+        # 球を作成
+        sphere = vtk.vtkSphereSource()
+        sphere.SetCenter(0, 0, 0)
+        
+        # モデルサイズに応じたサイズを設定
+        if self.processor.polydata is not None:
+            radius = self.calculate_sphere_radius() * 0.3
+        else:
+            radius = 0.005  # デフォルト
+        
+        sphere.SetRadius(radius)
+        sphere.SetThetaResolution(16)
+        sphere.SetPhiResolution(16)
+        sphere.Update()
+        
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(sphere.GetOutputPort())
+        
+        self.origin_sphere_actor = vtk.vtkActor()
+        self.origin_sphere_actor.SetMapper(mapper)
+        self.origin_sphere_actor.GetProperty().SetColor(1, 1, 0)  # 黄色
+        
+        self.renderer.AddActor(self.origin_sphere_actor)
+        self.vtk_render_widget.GetRenderWindow().Render()
+    
+    def calculate_sphere_radius(self):
+        """球体サイズを計算（モデルサイズに基づく）"""
+        if self.processor.polydata is None:
+            return 0.01  # デフォルト
+        
+        bounds = self.processor.polydata.GetBounds()
+        max_dim = max(
+            bounds[1] - bounds[0],  # X範囲
+            bounds[3] - bounds[2],  # Y範囲
+            bounds[5] - bounds[4]   # Z範囲
+        )
+        
+        # モデルサイズの2%を半径とする
+        return max_dim * 0.02
+    
     def toggle_axes(self, checked: bool):
         """軸表示切り替え"""
         self.axes_widget.SetEnabled(1 if checked else 0)
         # 原点座標軸も切り替え
         for actor in self.origin_axes_actors:
             actor.SetVisibility(1 if checked else 0)
+        # 原点球も切り替え
+        if self.origin_sphere_actor:
+            self.origin_sphere_actor.SetVisibility(1 if checked else 0)
         self.vtk_render_widget.GetRenderWindow().Render()
     
     def update_opacity(self, value: int):

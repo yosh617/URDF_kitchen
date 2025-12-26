@@ -110,6 +110,13 @@ class PartsEditorWidget(QtWidgets.QWidget):
         # STL アクター
         self.stl_actor = None
         
+        # 原点球アクター
+        self.origin_sphere_actor = None
+        self.add_origin_sphere()
+        
+        # 重心アクター
+        self.com_actor = None
+        
         layout.addWidget(self.vtk_render_widget)
         
         # ツールバー
@@ -176,12 +183,42 @@ class PartsEditorWidget(QtWidgets.QWidget):
         
         self.vtk_render_widget.GetRenderWindow().Render()
     
+    def add_origin_sphere(self):
+        """原点に球を追加"""
+        # 球を作成
+        sphere = vtk.vtkSphereSource()
+        sphere.SetCenter(0, 0, 0)
+        
+        # モデルサイズに応じたサイズを設定
+        if self.stl_processor.polydata is not None:
+            radius = self.calculate_sphere_radius() * 0.3
+        else:
+            radius = 0.005  # デフォルト
+        
+        sphere.SetRadius(radius)
+        sphere.SetThetaResolution(16)
+        sphere.SetPhiResolution(16)
+        sphere.Update()
+        
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(sphere.GetOutputPort())
+        
+        self.origin_sphere_actor = vtk.vtkActor()
+        self.origin_sphere_actor.SetMapper(mapper)
+        self.origin_sphere_actor.GetProperty().SetColor(1, 1, 0)  # 黄色
+        
+        self.renderer.AddActor(self.origin_sphere_actor)
+        self.vtk_render_widget.GetRenderWindow().Render()
+    
     def toggle_axes(self, checked: bool):
         """軸表示切り替え"""
         self.axes_widget.SetEnabled(1 if checked else 0)
         # 原点座標軸も切り替え
         for actor in self.origin_axes_actors:
             actor.SetVisibility(1 if checked else 0)
+        # 原点球も切り替え
+        if self.origin_sphere_actor:
+            self.origin_sphere_actor.SetVisibility(1 if checked else 0)
         self.vtk_render_widget.GetRenderWindow().Render()
     
     def update_opacity(self, value: int):
@@ -362,6 +399,8 @@ class PartsEditorWidget(QtWidgets.QWidget):
             spin.setRange(-10000, 10000)
             spin.setDecimals(6)
             spin.setSingleStep(0.01)
+            # リアルタイム更新を追加（値が変更されたら即座に3D表示を更新）
+            spin.valueChanged.connect(self.update_point_position_realtime)
         
         coord_layout.addRow(tr("name") + ":", self.point_name_edit)
         coord_layout.addRow("X:", self.point_x_spin)
@@ -527,7 +566,22 @@ class PartsEditorWidget(QtWidgets.QWidget):
             success = self.stl_processor.load_stl(file_path)
             if success:
                 self.current_stl_file = file_path
+                self.calculator.set_polydata(self.stl_processor.polydata)
                 self.update_3d_view()
+                self.info_label.setText(f"STL: {Path(file_path).name}")
+                
+                # 座標軸と原点球のサイズを更新
+                self.add_origin_axes()
+                
+                # 原点球を再作成（サイズ更新）
+                if self.origin_sphere_actor:
+                    self.renderer.RemoveActor(self.origin_sphere_actor)
+                self.add_origin_sphere()
+                
+                # 体積を自動計算
+                if self.volume_auto_check.isChecked():
+                    self.volume_spin.setValue(self.calculator.volume)
+                
                 self.event_bus.status_message.emit(
                     f"{tr('file_loaded')}: {Path(file_path).name}",
                     3000
@@ -538,18 +592,6 @@ class PartsEditorWidget(QtWidgets.QWidget):
                 tr("error"),
                 f"Failed to load STL: {e}"
             )
-        
-        if file_path:
-            success = self.stl_processor.load_stl(file_path)
-            if success:
-                self.current_stl_file = file_path
-                self.calculator.set_polydata(self.stl_processor.polydata)
-                self.update_3d_view()
-                self.info_label.setText(f"STL: {Path(file_path).name}")
-                
-                # 体積を自動計算
-                if self.volume_auto_check.isChecked():
-                    self.volume_spin.setValue(self.calculator.volume)
     
     def load_part_xml(self):
         """パーツXML読み込み"""
@@ -677,6 +719,23 @@ class PartsEditorWidget(QtWidgets.QWidget):
             self.update_connection_points_display()
             self.has_unsaved_changes = True
     
+    def update_point_position_realtime(self, value):
+        """座標値変更時にリアルタイムで3D表示を更新"""
+        current = self.points_list.currentItem()
+        if current:
+            name = current.text()
+            if name in self.connection_points:
+                point = self.connection_points[name]
+                # 座標を更新
+                point.position = [
+                    self.point_x_spin.value(),
+                    self.point_y_spin.value(),
+                    self.point_z_spin.value()
+                ]
+                # 3D表示を即座に更新
+                self.update_connection_points_display()
+                self.has_unsaved_changes = True
+    
     def calculate_properties(self):
         """物理パラメータ計算"""
         if self.calculator.polydata is None:
@@ -718,7 +777,50 @@ class PartsEditorWidget(QtWidgets.QWidget):
         self.com_y_spin.setValue(com[1])
         self.com_z_spin.setValue(com[2])
         
+        # 重心を3Dビューに表示
+        self.show_center_of_mass(com)
+        
         self.has_unsaved_changes = True
+    
+    def show_center_of_mass(self, com):
+        """重心を3Dビューに表示（赤い球）"""
+        # 既存の重心アクターを削除
+        if self.com_actor:
+            self.renderer.RemoveActor(self.com_actor)
+        
+        # 重心を可視化（赤い点）
+        sphere = vtk.vtkSphereSource()
+        sphere.SetCenter(com)
+        sphere.SetRadius(self.calculate_sphere_radius() * 0.5)
+        sphere.SetThetaResolution(16)
+        sphere.SetPhiResolution(16)
+        sphere.Update()
+        
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(sphere.GetOutputPort())
+        
+        self.com_actor = vtk.vtkActor()
+        self.com_actor.SetMapper(mapper)
+        self.com_actor.GetProperty().SetColor(1, 0, 0)  # 赤色
+        self.com_actor.GetProperty().SetOpacity(0.7)
+        
+        self.renderer.AddActor(self.com_actor)
+        self.vtk_render_widget.GetRenderWindow().Render()
+    
+    def calculate_sphere_radius(self):
+        """接続点や重心の球体サイズを計算"""
+        if self.stl_processor.polydata is None:
+            return 0.01  # デフォルト
+        
+        bounds = self.stl_processor.polydata.GetBounds()
+        max_dim = max(
+            bounds[1] - bounds[0],  # X範囲
+            bounds[3] - bounds[2],  # Y範囲
+            bounds[5] - bounds[4]   # Z範囲
+        )
+        
+        # モデルサイズの2%を半径とする
+        return max_dim * 0.02
     
     def calculate_inertia_precise(self):
         """慣性テンソル（精密計算）"""
@@ -922,30 +1024,77 @@ class PartsEditorWidget(QtWidgets.QWidget):
         print("View updated and rendered")
     
     def update_connection_points_display(self):
-        """接続点表示を更新"""
+        """接続点表示を更新（座標軸+円のデザイン）"""
         # 既存の接続点アクターを削除
         for point in self.connection_points.values():
             if point.actor:
                 self.renderer.RemoveActor(point.actor)
                 point.actor = None
         
-        # 新しい接続点を追加
+        # 球体・軸サイズを計算
+        sphere_radius = self.calculate_sphere_radius()
+        axis_length = sphere_radius * 36  # urdf_kitchen_PartsEditor.pyと同様
+        
+        # 新しい接続点を追加（vtkAssemblyを使用）
         for point in self.connection_points.values():
-            sphere = vtk.vtkSphereSource()
-            sphere.SetCenter(point.position)
-            sphere.SetRadius(5.0)  # 可視サイズ
-            sphere.SetThetaResolution(16)
-            sphere.SetPhiResolution(16)
+            # アセンブリ作成
+            assembly = vtk.vtkAssembly()
             
-            mapper = vtk.vtkPolyDataMapper()
-            mapper.SetInputConnection(sphere.GetOutputPort())
+            # XYZ軸の作成
+            colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]  # 赤、緑、青
+            for i, color in enumerate(colors):
+                for direction in [1, -1]:  # 正方向と負方向の両方
+                    line_source = vtk.vtkLineSource()
+                    line_source.SetPoint1(
+                        point.position[0] - (axis_length / 2) * (i == 0) * direction,
+                        point.position[1] - (axis_length / 2) * (i == 1) * direction,
+                        point.position[2] - (axis_length / 2) * (i == 2) * direction
+                    )
+                    line_source.SetPoint2(
+                        point.position[0] + (axis_length / 2) * (i == 0) * direction,
+                        point.position[1] + (axis_length / 2) * (i == 1) * direction,
+                        point.position[2] + (axis_length / 2) * (i == 2) * direction
+                    )
+
+                    mapper = vtk.vtkPolyDataMapper()
+                    mapper.SetInputConnection(line_source.GetOutputPort())
+
+                    actor = vtk.vtkActor()
+                    actor.SetMapper(mapper)
+                    actor.GetProperty().SetColor(color)
+                    actor.GetProperty().SetLineWidth(2)
+
+                    assembly.AddPart(actor)
+
+            # XY, XZ, YZ平面の円を作成
+            for i in range(3):
+                circle = vtk.vtkRegularPolygonSource()
+                circle.SetNumberOfSides(50)
+                circle.SetRadius(sphere_radius)
+                circle.SetCenter(point.position[0], point.position[1], point.position[2])
+                if i == 0:  # XY平面
+                    circle.SetNormal(0, 0, 1)
+                elif i == 1:  # XZ平面
+                    circle.SetNormal(0, 1, 0)
+                else:  # YZ平面
+                    circle.SetNormal(1, 0, 0)
+
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputConnection(circle.GetOutputPort())
+
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                
+                # 円のプロパティを設定
+                actor.GetProperty().SetColor(1, 0, 1)  # 紫色
+                actor.GetProperty().SetRepresentationToWireframe()
+                actor.GetProperty().SetLineWidth(6)
+                actor.GetProperty().SetOpacity(0.7)
+
+                assembly.AddPart(actor)
             
-            actor = vtk.vtkActor()
-            actor.SetMapper(mapper)
-            actor.GetProperty().SetColor(point.color)
-            
-            self.renderer.AddActor(actor)
-            point.actor = actor
+            self.renderer.AddActor(assembly)
+            point.actor = assembly
         
         self.vtk_render_widget.GetRenderWindow().Render()
     
