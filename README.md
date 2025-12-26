@@ -1,82 +1,160 @@
-# URDF_kitchen beta  
-<img width="600" alt="urdf_kitchen_beta" src="docs/urdf_kitchen_banner202550406.png">  
-  
-URDF_kitchenは、URDFの組み立てをサポートするPythonツールです。  
-STLファイルにジョイントポイントを設定し、ノードで接続していくことで組み立て、URDFとしてエクスポートします。  
-重量入力やイナーシャ計算、パーツごとの着色などにも対応しています。  
-  
-# Tools  
-  
-### STEP 1 -  仕込み -  "StlSourcer"  
-<img width="500" alt="urdf_kitchen_beta" src="docs/StlSourcer.png">  
-Stlの中心点や座標軸の入れ替えを行うツールです。  
-この工程は不要な場合がほとんどです。  
-  
-### STEP 2 - 調理 - "PartsEditor"  
-<img width="500" alt="urdf_kitchen_beta" src="docs/PartsEditor.png">  
-stlファイルに次のパーツを接続するジョイントポイントを設定するツールです。  
-ジョイントポイントは8つまで設定でき、回転軸や色なども設定できます。  
-左右対称のロボットの場合、左側のパーツさえ設定すれば右側は自動で出力できます。  
-設定ファイルはパーツと対になるxmlとして保存します。  
-  
-### STEP 3 - 盛り付け - "Assembler"  
-<img width="500" alt="urdf_kitchen_beta" src="docs/Assembler.png">  
-urdfをプラモデルのように最後の組み立てられるツールです。  
-設定ファイルをまとめて読み込み、パーツ同士をノードでポチポチと接続していきます。  
-作業途中のファイルを保存する機能や、回転軸を確認する機能などもあります。  
-  
-完成したURDFのチェックは、Garrett Johnsonが作成したブラウザツールで可能です。
-ツール内にもリンクのボタンを設置しています。
+# URDF Kitchen Studio
 
-https://gkjohnson.github.io/urdf-loaders/javascript/example/bundle/
+<img width="600" alt="urdf_kitchen_studio" src="docs/urdf_kitchen_banner202550406.png">
 
-# Install  
-python 3.9, python 3.11などで動作します。(3.10はライブラリの都合で素直に動かないかもしれません)  
-  
-### libraryとpip  
-  
+**URDF Kitchen Studio**は、URDFファイルの作成を支援する統合開発環境です。  
+3つの専用モード（STL Editor, Parts Editor, Assembler）を切り替えながら、直感的なビジュアル操作でロボットモデルを組み立て、URDFとしてエクスポートできます。
+
+## 主な機能
+
+### 統合3モードワークフロー
+
+1. **STL Editor** - STLメッシュの座標系調整
+   - 座標変換（移動・回転・スケール・反転）
+   - リアルタイム3Dプレビュー
+   - ワイヤーフレーム表示・軸表示
+
+2. **Parts Editor** - パーツ定義と物理パラメータ設定
+   - 接続点管理（最大8点）
+   - 物理パラメータ自動計算（体積・密度・質量）
+   - 重心計算
+   - 慣性テンソル計算（精密/バウンディングボックス）
+
+3. **Assembler** - ビジュアルノードグラフでロボット組立
+   - ノードグラフベースの直感的な組立
+   - リアルタイム3Dプレビュー
+   - ツリービュー表示
+   - URDF自動生成・エクスポート
+
+### 多言語対応
+
+- 日本語/英語の切り替え対応
+- UI全体の即座な言語切り替え
+
+### プロジェクト管理
+
+- プロジェクト単位でのファイル管理
+- 自動保存・読み込み
+- 最近使用したプロジェクトの履歴
+
+### ワークフロー連携
+
+- STL Editor → Parts Editor → Assembler の自動データ連携
+- ワンクリックでモード間のファイル受け渡し
+
+## 必要環境
+
+- **Python**: 3.9, 3.11, 3.12 推奨
+  - ⚠️ Python 3.10: 一部ライブラリの互換性問題あり
+- **OS**: Windows, macOS, Linux
+
+## インストール
+
+### 1. 依存ライブラリのインストール
+
+```bash
+pip install numpy
+pip install PySide6
+pip install vtk
+pip install NodeGraphQt
 ```
-pip install numpy  
-pip install PySide6  
-pip install vtk  
-pip install NodeGraphQt  
+
+### 2. トラブルシューティング（Python 3.12の場合）
+
+Python 3.12で起動できない場合、NodeGraphQtのインポートエラーが発生することがあります：
+
+```bash
+pip install packaging
 ```
 
-##### 起動できない場合
-Windows11+python3.12で起動できないという報告がありました。  
-python3.12から消えたdistutilsが原因とのことで、  
-NodeGraphQtのmenu.py,viewer.pyについて、  
-from distutils.version import LooseVersion  
-から  
-from packaging.version import Version as LooseVersion  
-に修正することで起動したとのことです。  
+NodeGraphQtの`menu.py`と`viewer.py`を編集：
 
-### 実行方法  
-  
-ターミナルにて、DLしたファイルがある場所にcdで移動し、  
-python urdf_kitchen_StlSourcer.py  
-python urdf_kitchen_PartsEditor.py  
-python urdf_kitchen_Assembler.py  
-と入力して実行します。初回起動は少し時間がかかります。  
-  
-# バグレポート  
-  
-絶賛バグフィックス中です。  
-特にパラメータの計算や反映について検算や検証が必要です。  
+```python
+# 変更前
+from distutils.version import LooseVersion
 
-- urdf_kitchen_StlSourcer.py で回転を繰り返すと誤差が蓄積するようです。回転前に一度Rでリセットし、最小の回転回数で保存を行うとズレを抑えられる可能性があります。(20241214)  
-- ~~AssemblerでRotationをFixedにしたとき、Rotation Testボタンで本来は動かないべきだが、Z軸で回転する~~ (20250103修正済)
-- AssemblerのノードにMassless Decolationを指定したい際、その要素のjointやlinkを作らず親ノードのvisualとして処理するように修正済(20250103)
-- PartsEditor.pyのBatch convet...ボタンを押した際、既存のr_.stl, r_.xmlがある場合は上書きしないよう修正済(20250103)
-  
-# Tutorial  
+# 変更後
+from packaging.version import Version as LooseVersion
+```
 
-作業のフローをとりいそぎ下記の記事にまとめました。  
-公式のチュートリアルやガイドも別途製作中です。  
+## 使い方
 
-https://qiita.com/Ninagawa123/items/c4643ca92e57c3a45efb  
- 
+### アプリケーションの起動
+
+```bash
+**python urdf_kitchen_main.py
+**```
+
+### 基本ワークフロー
+
+1. **新規プロジェクト作成**
+   - ホーム画面から「新規プロジェクトを作成」
+   - プロジェクト保存先を選択
+
+2. **STL Editor（オプション）**
+   - STLファイルを開く
+   - 座標系を調整（必要な場合）
+   - 保存して「Parts Editorに送る」
+
+3. **Parts Editor**
+   - STLファイルを読み込み
+   - 接続点を追加・編集
+   - 物理パラメータを設定
+   - パーツXMLを保存して「Assemblerに送る」
+
+4. **Assembler**
+   - base_linkノードを追加
+   - パーツノードを追加
+   - ノード間を接続
+   - URDFをエクスポート
+
+### サンプルプロジェクト
+
+初めての方は、ホーム画面から「サンプルプロジェクト(roborecipe2)を開く」をお試しください。
+
+## プロジェクト構造
+
+```
+robotname_description/
+├── project.uks          # プロジェクト設定ファイル
+├── meshes/              # STLメッシュファイル
+│   └── *.stl
+└── urdf/                # URDFおよびパーツXMLファイル
+    ├── *.xml            # パーツ定義XMLファイル
+    └── *.urdf           # 生成されたURDFファイル
+```
+
+## 既知の問題
+
+- **STL Sourcer**: 回転を繰り返すと誤差が蓄積（回転前にリセット推奨）
+- ~~**Assembler**: Fixed Jointの回転テスト動作~~ (修正済み 2025/01/03)
+- **Massless Decoration**: 親ノードのvisualとして処理（修正済み 2025/01/03)
+
+## チュートリアル
+
+詳細なチュートリアルは以下をご参照ください：
+
+https://qiita.com/Ninagawa123/items/c4643ca92e57c3a45efb
 
 <a href="https://qiita.com/Ninagawa123/items/c4643ca92e57c3a45efb">
   <img src="docs/urdf_kitchen.png" alt="URDF Kitchenロゴ" width="400">
 </a>
+
+## 関連リンク
+
+- **URDF Viewer**: https://gkjohnson.github.io/urdf-loaders/javascript/example/bundle/
+  - 生成したURDFをブラウザで確認できます
+
+## ライセンス
+
+このプロジェクトはMITライセンスの下で公開されています。
+
+## 謝辞
+
+- VTK: 3D可視化ライブラリ
+- NodeGraphQt: ノードグラフUIライブラリ
+- PySide6: Qtバインディング
+
+---
+
+**URDF Kitchen Studio** - Make URDF creation as easy as cooking!

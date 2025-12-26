@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.project import URDFProject
 from utils.event_bus import event_bus
-from utils.translator import translator, tr
+from utils.translator import translator, tr, TranslationManager
 
 
 class HomeScreenWidget(QWidget):
@@ -54,32 +54,39 @@ class HomeScreenWidget(QWidget):
         header_layout = QHBoxLayout()
         header_layout.addStretch()
         
-        language_label = QLabel("Language:")
-        language_combo = QComboBox()
-        language_combo.addItem("日本語 (Japanese)", "ja")
-        language_combo.addItem("English", "en")
-        language_combo.setCurrentData(translator.get_language())
-        language_combo.currentDataChanged.connect(self._on_language_changed)
+        self.language_label = QLabel("Language:")
+        self.language_combo = QComboBox()
+        self.language_combo.addItem("日本語 (Japanese)", "ja")
+        self.language_combo.addItem("English", "en")
         
-        header_layout.addWidget(language_label)
-        header_layout.addWidget(language_combo)
+        # 現在の言語を選択
+        current_lang = translator.get_language()
+        for i in range(self.language_combo.count()):
+            if self.language_combo.itemData(i) == current_lang:
+                self.language_combo.setCurrentIndex(i)
+                break
+        
+        self.language_combo.currentIndexChanged.connect(self._on_language_changed)
+        
+        header_layout.addWidget(self.language_label)
+        header_layout.addWidget(self.language_combo)
         main_layout.addLayout(header_layout)
         
         # ===== タイトル =====
-        title_label = QLabel(tr("app_title"))
+        self.title_label = QLabel(tr("app_title"))
         title_font = QFont()
         title_font.setPointSize(28)
         title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(title_label)
+        self.title_label.setFont(title_font)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.title_label)
         
-        subtitle_label = QLabel(tr("app_subtitle"))
+        self.subtitle_label = QLabel(tr("app_subtitle"))
         subtitle_font = QFont()
         subtitle_font.setPointSize(12)
-        subtitle_label.setFont(subtitle_font)
-        subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(subtitle_label)
+        self.subtitle_label.setFont(subtitle_font)
+        self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.subtitle_label)
         
         main_layout.addSpacing(30)
         
@@ -87,40 +94,40 @@ class HomeScreenWidget(QWidget):
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
         content_splitter.setChildrenCollapsible(False)
         
-        # ----- 左パネル：プロジェクト操作 -----
+        # ----- 左パネル:プロジェクト操作 -----
         left_panel = QFrame()
         left_layout = QVBoxLayout()
         left_layout.setSpacing(10)
         
-        operations_label = QLabel(tr("project"))
+        self.operations_label = QLabel(tr("project"))
         operations_font = QFont()
         operations_font.setPointSize(14)
         operations_font.setBold(True)
-        operations_label.setFont(operations_font)
-        left_layout.addWidget(operations_label)
+        self.operations_label.setFont(operations_font)
+        left_layout.addWidget(self.operations_label)
         
         # 新規作成ボタン
-        new_project_btn = QPushButton(tr("new_project"))
-        new_project_btn.setMinimumHeight(50)
-        new_project_btn.setFont(QFont("", 11))
-        new_project_btn.clicked.connect(self._on_new_project)
-        left_layout.addWidget(new_project_btn)
+        self.new_project_btn = QPushButton(tr("new_project"))
+        self.new_project_btn.setMinimumHeight(50)
+        self.new_project_btn.setFont(QFont("", 11))
+        self.new_project_btn.clicked.connect(self._on_new_project)
+        left_layout.addWidget(self.new_project_btn)
         
         # 既存プロジェクト読み込みボタン
-        open_project_btn = QPushButton(tr("open_project"))
-        open_project_btn.setMinimumHeight(50)
-        open_project_btn.setFont(QFont("", 11))
-        open_project_btn.clicked.connect(self._on_open_project)
-        left_layout.addWidget(open_project_btn)
+        self.open_project_btn = QPushButton(tr("open_project"))
+        self.open_project_btn.setMinimumHeight(50)
+        self.open_project_btn.setFont(QFont("", 11))
+        self.open_project_btn.clicked.connect(self._on_open_project)
+        left_layout.addWidget(self.open_project_btn)
         
         left_layout.addSpacing(20)
         
-        recent_label = QLabel(tr("recent_projects"))
+        self.recent_label = QLabel(tr("recent_projects"))
         recent_font = QFont()
         recent_font.setPointSize(12)
         recent_font.setBold(True)
-        recent_label.setFont(recent_font)
-        left_layout.addWidget(recent_label)
+        self.recent_label.setFont(recent_font)
+        left_layout.addWidget(self.recent_label)
         
         # 最近使用したプロジェクトリスト
         self.recent_list = QListWidget()
@@ -134,12 +141,12 @@ class HomeScreenWidget(QWidget):
         right_layout = QVBoxLayout()
         right_layout.setSpacing(10)
         
-        info_label = QLabel(tr("start_guide"))
+        self.info_label = QLabel(tr("start_guide"))
         info_font = QFont()
         info_font.setPointSize(14)
         info_font.setBold(True)
-        info_label.setFont(info_font)
-        right_layout.addWidget(info_label)
+        self.info_label.setFont(info_font)
+        right_layout.addWidget(self.info_label)
         
         guide_text_content = (
             f"{tr('welcome')}\n\n"
@@ -152,18 +159,18 @@ class HomeScreenWidget(QWidget):
             f"{tr('sample_hint')}"
         )
         
-        guide_text = QLabel(guide_text_content)
-        guide_text.setFont(QFont("", 10))
-        guide_text.setWordWrap(True)
-        guide_text.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        right_layout.addWidget(guide_text)
+        self.guide_text = QLabel(guide_text_content)
+        self.guide_text.setFont(QFont("", 10))
+        self.guide_text.setWordWrap(True)
+        self.guide_text.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        right_layout.addWidget(self.guide_text)
         
         # サンプルプロジェクト読み込みボタン
-        sample_project_btn = QPushButton(tr("sample_project"))
-        sample_project_btn.setMinimumHeight(40)
-        sample_project_btn.setFont(QFont("", 10))
-        sample_project_btn.clicked.connect(self._on_open_sample_project)
-        right_layout.addWidget(sample_project_btn)
+        self.sample_project_btn = QPushButton(tr("sample_project"))
+        self.sample_project_btn.setMinimumHeight(40)
+        self.sample_project_btn.setFont(QFont("", 10))
+        self.sample_project_btn.clicked.connect(self._on_open_sample_project)
+        right_layout.addWidget(self.sample_project_btn)
         
         right_layout.addStretch()
         right_panel.setLayout(right_layout)
@@ -179,9 +186,9 @@ class HomeScreenWidget(QWidget):
         footer_layout = QHBoxLayout()
         footer_layout.addStretch()
         
-        version_label = QLabel(f"URDF Kitchen Studio {tr('version')}")
-        version_label.setFont(QFont("", 9))
-        footer_layout.addWidget(version_label)
+        self.version_label = QLabel(f"URDF Kitchen Studio {tr('version')}")
+        self.version_label.setFont(QFont("", 9))
+        footer_layout.addWidget(self.version_label)
         
         main_layout.addLayout(footer_layout)
         
@@ -322,13 +329,46 @@ class HomeScreenWidget(QWidget):
             print(f"Error opening project: {e}")
             event_bus.error_message.emit(f"{tr('error_open_project')}: {e}")
     
-    def _on_language_changed(self, language: str):
+    def _on_language_changed(self, index: int):
         """言語が変更された"""
-        if language != translator.get_language():
-            translator.set_language(language)
-            event_bus.language_changed.emit(language)
+        lang_code = self.language_combo.itemData(index)
+        trans_mgr = TranslationManager.instance()
+        if lang_code and lang_code != trans_mgr.get_language():
+            trans_mgr.set_language(lang_code)
+            event_bus.language_changed.emit(lang_code)
             event_bus.status_message.emit(tr("language_changed"), 3000)
+            
+            # UIを更新
+            self._update_ui_translations()
     
     def _on_language_changed_signal(self, language: str):
         """言語変更シグナルを受信（現在は未実装、今後の複数パネル対応用）"""
         pass
+    
+    def _update_ui_translations(self):
+        """UI要素の翻訳を更新"""
+        # タイトル
+        self.title_label.setText(tr("app_title"))
+        self.subtitle_label.setText(tr("app_subtitle"))
+        
+        # 左パネル
+        self.operations_label.setText(tr("project"))
+        self.new_project_btn.setText(tr("new_project"))
+        self.open_project_btn.setText(tr("open_project"))
+        self.recent_label.setText(tr("recent_projects"))
+        
+        # 右パネル
+        self.info_label.setText(tr("start_guide"))
+        guide_text_content = (
+            f"{tr('welcome')}\n\n"
+            f"{tr('workflow')}\n"
+            f"{tr('workflow_step1')}\n"
+            f"{tr('workflow_step2')}\n"
+            f"{tr('workflow_step3')}\n"
+            f"{tr('workflow_step4')}\n\n"
+            f"{tr('recommendation')}\n"
+            f"{tr('sample_hint')}"
+        )
+        self.guide_text.setText(guide_text_content)
+        self.sample_project_btn.setText(tr("sample_project"))
+        self.version_label.setText(f"URDF Kitchen Studio {tr('version')}")

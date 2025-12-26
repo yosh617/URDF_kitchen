@@ -17,12 +17,10 @@ class URDFProject:
     # プロジェクトファイル名
     PROJECT_FILE = "project.uks"
     
-    # ディレクトリ構成
+    # ディレクトリ構成 (ROS標準形式)
     DIRS = {
-        "stl": "stl",
-        "parts": "parts",
-        "assembly": "assembly",
-        "export": "export",
+        "meshes": "meshes",
+        "urdf": "urdf",
     }
     
     def __init__(self, project_path: str):
@@ -57,17 +55,15 @@ class URDFProject:
             "name": self.project_path.name,
             "created": datetime.now().isoformat(),
             "modified": datetime.now().isoformat(),
-            "stl_dir": str(self.project_path / self.DIRS["stl"]),
-            "parts_dir": str(self.project_path / self.DIRS["parts"]),
-            "assembly_dir": str(self.project_path / self.DIRS["assembly"]),
-            "export_dir": str(self.project_path / self.DIRS["export"]),
+            "meshes_dir": str(self.project_path / self.DIRS["meshes"]),
+            "urdf_dir": str(self.project_path / self.DIRS["urdf"]),
             "parts": {},  # {"part_name": {"stl_file": "...", "xml_file": "..."}}
             "assembly": {
                 "nodes": {},
                 "connections": {},
             },
             "dirty_flags": {
-                "stl": False,
+                "meshes": False,
                 "parts": False,
                 "assembly": False,
             }
@@ -96,21 +92,30 @@ class URDFProject:
         """プロジェクトを保存"""
         self._save()
     
+    def get_meshes_dir(self) -> Path:
+        """meshesディレクトリパスを取得 (STLファイル保存先)"""
+        return Path(self.data.get("meshes_dir", self.project_path / self.DIRS["meshes"]))
+    
+    def get_urdf_dir(self) -> Path:
+        """urdfディレクトリパスを取得 (URDF、パーツXML保存先)"""
+        return Path(self.data.get("urdf_dir", self.project_path / self.DIRS["urdf"]))
+    
+    # 後方互換性のためのエイリアス
     def get_stl_dir(self) -> Path:
-        """STL ディレクトリパスを取得"""
-        return Path(self.data.get("stl_dir", self.project_path / self.DIRS["stl"]))
+        """STL ディレクトリパスを取得 (meshesディレクトリを返す)"""
+        return self.get_meshes_dir()
     
     def get_parts_dir(self) -> Path:
-        """パーツディレクトリパスを取得"""
-        return Path(self.data.get("parts_dir", self.project_path / self.DIRS["parts"]))
+        """パーツディレクトリパスを取得 (urdfディレクトリを返す)"""
+        return self.get_urdf_dir()
     
     def get_assembly_dir(self) -> Path:
-        """アセンブリディレクトリパスを取得"""
-        return Path(self.data.get("assembly_dir", self.project_path / self.DIRS["assembly"]))
+        """アセンブリディレクトリパスを取得 (urdfディレクトリを返す)"""
+        return self.get_urdf_dir()
     
     def get_export_dir(self) -> Path:
-        """エクスポートディレクトリパスを取得"""
-        return Path(self.data.get("export_dir", self.project_path / self.DIRS["export"]))
+        """エクスポートディレクトリパスを取得 (urdfディレクトリを返す)"""
+        return self.get_urdf_dir()
     
     def add_part(self, part_name: str, stl_file: str, xml_file: Optional[str] = None):
         """パーツ情報を追加"""
