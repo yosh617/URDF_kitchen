@@ -2072,19 +2072,28 @@ class MainWidget(QWidget):
 
             # 新しいファイル名を生成（L/R反転）
             if name.startswith('L_'):
-                new_name = 'R_' + name[2:]
+                default_name = 'R_' + name[2:]
             elif name.startswith('l_'):
-                new_name = 'r_' + name[2:]
+                default_name = 'r_' + name[2:]
             elif name.startswith('R_'):
-                new_name = 'L_' + name[2:]
+                default_name = 'L_' + name[2:]
             elif name.startswith('r_'):
-                new_name = 'l_' + name[2:]
+                default_name = 'l_' + name[2:]
             else:
-                new_name = 'mirrored_' + name
+                default_name = 'mirrored_' + name
 
-            # ミラー化したファイルのパスを設定
-            mirrored_stl_path = os.path.join(original_dir, new_name + ext)
-            mirrored_xml_path = os.path.join(original_dir, new_name + '.xml')
+            # ファイル保存ダイアログを表示してユーザーにファイル名を指定させる
+            default_path = os.path.join(original_dir, default_name + ext)
+            mirrored_stl_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Mirrored STL File", default_path, "STL Files (*.stl)")
+            
+            if not mirrored_stl_path:
+                print("Operation cancelled by user")
+                return
+            
+            # STLファイルのパスから対応するXMLファイルのパスを生成
+            new_name = os.path.splitext(os.path.basename(mirrored_stl_path))[0]
+            mirrored_xml_path = os.path.join(os.path.dirname(mirrored_stl_path), new_name + '.xml')
 
             # 既存ファイルのチェックとダイアログ表示
             if os.path.exists(mirrored_stl_path) or os.path.exists(mirrored_xml_path):
