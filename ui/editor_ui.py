@@ -192,66 +192,28 @@ class PartsEditorWidget(QtWidgets.QWidget):
             self.vtk_render_widget.GetRenderWindow().Render()
     
     def toggle_plane(self, plane: str):
-        """平面表示切り替え"""
-        if self.plane_actors[plane]:
-            # 既存の平面を削除
-            self.renderer.RemoveActor(self.plane_actors[plane])
-            self.plane_actors[plane] = None
-        else:
-            # 新しい平面を作成
-            plane_source = vtk.vtkPlaneSource()
-            plane_source.SetXResolution(10)
-            plane_source.SetYResolution(10)
-            
-            size = 200
-            if plane == 'xy':
-                plane_source.SetOrigin(-size, -size, 0)
-                plane_source.SetPoint1(size, -size, 0)
-                plane_source.SetPoint2(-size, size, 0)
-                color = (0.3, 0.3, 0.5)
-            elif plane == 'xz':
-                plane_source.SetOrigin(-size, 0, -size)
-                plane_source.SetPoint1(size, 0, -size)
-                plane_source.SetPoint2(-size, 0, size)
-                color = (0.3, 0.5, 0.3)
-            else:  # yz
-                plane_source.SetOrigin(0, -size, -size)
-                plane_source.SetPoint1(0, size, -size)
-                plane_source.SetPoint2(0, -size, size)
-                color = (0.5, 0.3, 0.3)
-            
-            mapper = vtk.vtkPolyDataMapper()
-            mapper.SetInputConnection(plane_source.GetOutputPort())
-            
-            actor = vtk.vtkActor()
-            actor.SetMapper(mapper)
-            actor.GetProperty().SetColor(color)
-            actor.GetProperty().SetOpacity(0.2)
-            
-            self.renderer.AddActor(actor)
-            self.plane_actors[plane] = actor
-            
-            # カメラ視点をその平面の正面に設定
-            camera = self.renderer.GetActiveCamera()
-            
-            if plane == 'xy':
-                # XY平面: Z軸から見る
-                camera.SetPosition(0, 0, 1)
-                camera.SetFocalPoint(0, 0, 0)
-                camera.SetViewUp(0, 1, 0)
-            elif plane == 'xz':
-                # XZ平面: Y軸から見る
-                camera.SetPosition(0, 1, 0)
-                camera.SetFocalPoint(0, 0, 0)
-                camera.SetViewUp(0, 0, 1)
-            else:  # yz
-                # YZ平面: X軸から見る
-                camera.SetPosition(1, 0, 0)
-                camera.SetFocalPoint(0, 0, 0)
-                camera.SetViewUp(0, 0, 1)
-            
-            self.renderer.ResetCamera()
+        """平面視点切り替え（平面は表示しない）"""
+        # カメラ視点をその平面の正面に設定
+        camera = self.renderer.GetActiveCamera()
         
+        if plane == 'xy':
+            # XY平面: Z軸から見る
+            camera.SetPosition(0, 0, 1)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 1, 0)
+        elif plane == 'xz':
+            # XZ平面: Y軸から見る
+            camera.SetPosition(0, 1, 0)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 0, 1)
+        else:  # yz
+            # YZ平面: X軸から見る
+            camera.SetPosition(1, 0, 0)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 0, 1)
+        
+        self.renderer.ResetCamera()
+        self.fit_camera_to_model()
         self.vtk_render_widget.GetRenderWindow().Render()
     
     def create_viewer_toolbar(self) -> QtWidgets.QToolBar:

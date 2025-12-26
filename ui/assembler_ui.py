@@ -678,67 +678,109 @@ class AssemblerWidget(QtWidgets.QWidget):
         self.vtk_render_widget.GetRenderWindow().Render()
     
     def toggle_plane(self, plane: str):
-        """平面表示切り替え"""
-        if self.plane_actors[plane]:
-            # 既存の平面を削除
-            self.renderer.RemoveActor(self.plane_actors[plane])
-            self.plane_actors[plane] = None
-        else:
-            # 新しい平面を作成
-            plane_source = vtk.vtkPlaneSource()
-            plane_source.SetXResolution(10)
-            plane_source.SetYResolution(10)
-            
-            size = 200
-            if plane == 'xy':
-                plane_source.SetOrigin(-size, -size, 0)
-                plane_source.SetPoint1(size, -size, 0)
-                plane_source.SetPoint2(-size, size, 0)
-                color = (0.3, 0.3, 0.5)
-            elif plane == 'xz':
-                plane_source.SetOrigin(-size, 0, -size)
-                plane_source.SetPoint1(size, 0, -size)
-                plane_source.SetPoint2(-size, 0, size)
-                color = (0.3, 0.5, 0.3)
-            else:  # yz
-                plane_source.SetOrigin(0, -size, -size)
-                plane_source.SetPoint1(0, size, -size)
-                plane_source.SetPoint2(0, -size, size)
-                color = (0.5, 0.3, 0.3)
-            
-            mapper = vtk.vtkPolyDataMapper()
-            mapper.SetInputConnection(plane_source.GetOutputPort())
-            
-            actor = vtk.vtkActor()
-            actor.SetMapper(mapper)
-            actor.GetProperty().SetColor(color)
-            actor.GetProperty().SetOpacity(0.2)
-            
-            self.renderer.AddActor(actor)
-            self.plane_actors[plane] = actor
-            
-            # カメラ視点をその平面の正面に設定
-            camera = self.renderer.GetActiveCamera()
-            
-            if plane == 'xy':
-                # XY平面: Z軸から見る
-                camera.SetPosition(0, 0, 1)
-                camera.SetFocalPoint(0, 0, 0)
-                camera.SetViewUp(0, 1, 0)
-            elif plane == 'xz':
-                # XZ平面: Y軸から見る
-                camera.SetPosition(0, 1, 0)
-                camera.SetFocalPoint(0, 0, 0)
-                camera.SetViewUp(0, 0, 1)
-            else:  # yz
-                # YZ平面: X軸から見る
-                camera.SetPosition(1, 0, 0)
-                camera.SetFocalPoint(0, 0, 0)
-                camera.SetViewUp(0, 0, 1)
-            
-            self.renderer.ResetCamera()
+        """平面視点切り替え（平面は表示しない）"""
+        # カメラ視点をその平面の正面に設定
+        camera = self.renderer.GetActiveCamera()
         
+        if plane == 'xy':
+            # XY平面: Z軸から見る
+            camera.SetPosition(0, 0, 1)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 1, 0)
+        elif plane == 'xz':
+            # XZ平面: Y軸から見る
+            camera.SetPosition(0, 1, 0)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 0, 1)
+        else:  # yz
+            # YZ平面: X軸から見る
+            camera.SetPosition(1, 0, 0)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 0, 1)
+        
+        self.renderer.ResetCamera()
+        self.fit_camera_to_model()
         self.vtk_render_widget.GetRenderWindow().Render()
+    
+    def fit_camera_to_model(self):
+        """アセンブリモデルが画面いっぱいに表示されるようにカメラを調整"""
+        # すべてのアクターの境界を計算
+        actors = self.renderer.GetActors()
+        if actors.GetNumberOfItems() == 0:
+            return
+        
+        # 軸アクター以外のアクターの境界を集める
+        bounds_list = []
+        actors.InitTraversal()
+        actor = actors.GetNextItem()
+        while actor:
+            # 軸アクターをスキップ
+            if actor not in self.origin_axes_actors:
+                actor_bounds = actor.GetBounds()
+                if actor_bounds[0] != actor_bounds[1]:  # 有効な境界
+                    bounds_list.append(actor_bounds)
+            actor = actors.GetNextItem()
+        
+        if not bounds_list:
+            return
+        
+        # 全体の境界を計算
+        min_x = min(b[0] for b in bounds_list)
+        max_x = max(b[1] for b in bounds_list)
+        min_y = min(b[2] for b in bounds_list)
+        max_y = max(b[3] for b in bounds_list)
+        min_z = min(b[4] for b in bounds_list)
+        max_z = max(b[5] for b in bounds_list)
+        
+        # モデルの中心を計算
+        center = [
+            (min_x + max_x) / 2,
+            (min_y + max_y) / 2,
+            (min_z + max_z) / 2
+        ]
+        
+        # モデルの大きさを計算
+        size = max(
+            max_x - min_x,
+            max_y - min_y,
+            max_z - min_z
+        )
+        
+        # 20%の余裕を追加
+        size *= 1.4
+        
+        camera = self.renderer.GetActiveCamera()
+        
+        # 現在のカメラの方向ベクトルを保持
+        current_position = np.array(camera.GetPosition())
+        focal_point = np.array(center)
+        direction = current_position - focal_point
+        
+        # 方向ベクトルを正規化
+        if np.linalg.norm(direction) > 0:
+            direction = direction / np.linalg.norm(direction)
+        else:
+            direction = np.array([1, 0, 0])  # デフォルト方向
+        
+        # 新しい位置を計算
+        new_position = focal_point + direction * size
+        
+        # カメラの位置を更新
+        camera.SetPosition(new_position)
+        camera.SetFocalPoint(*center)
+        
+        # ビューポートのアスペクト比を取得
+        viewport = self.renderer.GetViewport()
+        aspect_ratio = (viewport[2] - viewport[0]) / (viewport[3] - viewport[1])
+        
+        # パラレル投影の場合、パラレルスケールを設定
+        if camera.GetParallelProjection():
+            if aspect_ratio > 1:  # 横長の画面
+                camera.SetParallelScale(size / 2)
+            else:  # 縦長の画面
+                camera.SetParallelScale(size / (2 * aspect_ratio))
+        
+        self.renderer.ResetCameraClippingRange()
     
     def reset_3d_view(self):
         """3Dビューリセット"""

@@ -7,6 +7,7 @@ from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtGui import QAction
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 import vtk
+import numpy as np
 import os
 from pathlib import Path
 
@@ -73,6 +74,11 @@ class STLSourcerWidget(QtWidgets.QWidget):
         # インタラクタースタイル
         style = vtk.vtkInteractorStyleTrackballCamera()
         self.interactor.SetInteractorStyle(style)
+        
+        # パラレル投影を設定
+        camera = self.renderer.GetActiveCamera()
+        camera.SetParallelProjection(True)
+        camera.SetParallelScale(5)
         
         # 軸表示
         self.axes_actor = vtk.vtkAxesActor()
@@ -536,6 +542,7 @@ class STLSourcerWidget(QtWidgets.QWidget):
     def reset_camera(self):
         """カメラをリセット"""
         self.renderer.ResetCamera()
+        self.fit_camera_to_model()
         self.vtk_render_widget.GetRenderWindow().Render()
     
     def toggle_wireframe(self, checked: bool):
@@ -608,67 +615,89 @@ class STLSourcerWidget(QtWidgets.QWidget):
             self.vtk_render_widget.GetRenderWindow().Render()
     
     def toggle_plane(self, plane: str):
-        """平面表示切り替え"""
-        if self.plane_actors[plane]:
-            # 既存の平面を削除
-            self.renderer.RemoveActor(self.plane_actors[plane])
-            self.plane_actors[plane] = None
-        else:
-            # 新しい平面を作成
-            plane_source = vtk.vtkPlaneSource()
-            plane_source.SetXResolution(10)
-            plane_source.SetYResolution(10)
-            
-            size = 200
-            if plane == 'xy':
-                plane_source.SetOrigin(-size, -size, 0)
-                plane_source.SetPoint1(size, -size, 0)
-                plane_source.SetPoint2(-size, size, 0)
-                color = (0.3, 0.3, 0.5)
-            elif plane == 'xz':
-                plane_source.SetOrigin(-size, 0, -size)
-                plane_source.SetPoint1(size, 0, -size)
-                plane_source.SetPoint2(-size, 0, size)
-                color = (0.3, 0.5, 0.3)
-            else:  # yz
-                plane_source.SetOrigin(0, -size, -size)
-                plane_source.SetPoint1(0, size, -size)
-                plane_source.SetPoint2(0, -size, size)
-                color = (0.5, 0.3, 0.3)
-            
-            mapper = vtk.vtkPolyDataMapper()
-            mapper.SetInputConnection(plane_source.GetOutputPort())
-            
-            actor = vtk.vtkActor()
-            actor.SetMapper(mapper)
-            actor.GetProperty().SetColor(color)
-            actor.GetProperty().SetOpacity(0.2)
-            
-            self.renderer.AddActor(actor)
-            self.plane_actors[plane] = actor
-            
-            # カメラ視点をその平面の正面に設定
-            camera = self.renderer.GetActiveCamera()
-            
-            if plane == 'xy':
-                # XY平面: Z軸から見る
-                camera.SetPosition(0, 0, 1)
-                camera.SetFocalPoint(0, 0, 0)
-                camera.SetViewUp(0, 1, 0)
-            elif plane == 'xz':
-                # XZ平面: Y軸から見る
-                camera.SetPosition(0, 1, 0)
-                camera.SetFocalPoint(0, 0, 0)
-                camera.SetViewUp(0, 0, 1)
-            else:  # yz
-                # YZ平面: X軸から見る
-                camera.SetPosition(1, 0, 0)
-                camera.SetFocalPoint(0, 0, 0)
-                camera.SetViewUp(0, 0, 1)
-            
-            self.renderer.ResetCamera()
+        """平面視点切り替え（平面は表示しない）"""
+        # カメラ視点をその平面の正面に設定
+        camera = self.renderer.GetActiveCamera()
         
+        if plane == 'xy':
+            # XY平面: Z軸から見る
+            camera.SetPosition(0, 0, 1)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 1, 0)
+        elif plane == 'xz':
+            # XZ平面: Y軸から見る
+            camera.SetPosition(0, 1, 0)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 0, 1)
+        else:  # yz
+            # YZ平面: X軸から見る
+            camera.SetPosition(1, 0, 0)
+            camera.SetFocalPoint(0, 0, 0)
+            camera.SetViewUp(0, 0, 1)
+        
+        self.renderer.ResetCamera()
+        self.fit_camera_to_model()
         self.vtk_render_widget.GetRenderWindow().Render()
+    
+    def fit_camera_to_model(self):
+        """STLモデルが画面いっぱいに表示されるようにカメラを調整"""
+        if self.processor.polydata is None:
+            return
+        
+        camera = self.renderer.GetActiveCamera()
+        bounds = self.processor.polydata.GetBounds()
+        
+        # モデルの中心を計算
+        center = [
+            (bounds[0] + bounds[1]) / 2,
+            (bounds[2] + bounds[3]) / 2,
+            (bounds[4] + bounds[5]) / 2
+        ]
+        
+        # モデルの大きさを計算
+        size = max(
+            bounds[1] - bounds[0],
+            bounds[3] - bounds[2],
+            bounds[5] - bounds[4]
+        )
+        
+        # 20%の余裕を追加
+        size *= 1.4
+        
+        # 現在のカメラの方向ベクトルを保持
+        current_position = np.array(camera.GetPosition())
+        focal_point = np.array(center)
+        direction = current_position - focal_point
+        
+        # 方向ベクトルを正規化
+        if np.linalg.norm(direction) > 0:
+            direction = direction / np.linalg.norm(direction)
+        else:
+            direction = np.array([1, 0, 0])  # デフォルト方向
+        
+        # 新しい位置を計算
+        new_position = focal_point + direction * size
+        
+        # カメラの位置を更新
+        camera.SetPosition(new_position)
+        camera.SetFocalPoint(*center)
+        
+        # ビューポートのアスペクト比を取得
+        viewport = self.renderer.GetViewport()
+        aspect_ratio = (viewport[2] - viewport[0]) / (viewport[3] - viewport[1])
+        
+        # パラレル投影の場合、パラレルスケールを設定
+        if camera.GetParallelProjection():
+            if aspect_ratio > 1:  # 横長の画面
+                camera.SetParallelScale(size / 2)
+            else:  # 縦長の画面
+                camera.SetParallelScale(size / (2 * aspect_ratio))
+        else:
+            # パースペクティブ投影の場合、視野角を調整
+            angle = 30  # 視野角（度）
+            camera.SetViewAngle(angle)
+        
+        self.renderer.ResetCameraClippingRange()
     
     def update_3d_view(self):
         """3Dビューを更新"""
@@ -707,6 +736,7 @@ class STLSourcerWidget(QtWidgets.QWidget):
             self.add_origin_axes()
         
         self.renderer.ResetCamera()
+        self.fit_camera_to_model()
         self.vtk_render_widget.GetRenderWindow().Render()
         print("View updated and rendered")
     
