@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "name": "test_project",
+  "created": "2025-12-26T11:24:50.468257",
+  "modified": "2025-12-26T11:24:50.468257",
+  "stl_dir": "C:\\Users\\space\\OneDrive\\デスクトップ\\AGIRobots\\make_URDF\\URDF_kitchen\\test_project\\stl",
+  "parts_dir": "C:\\Users\\space\\OneDrive\\デスクトップ\\AGIRobots\\make_URDF\\URDF_kitchen\\test_project\\parts",
+  "assembly_dir": "C:\\Users\\space\\OneDrive\\デスクトップ\\AGIRobots\\make_URDF\\URDF_kitchen\\test_project\\assembly",
+  "export_dir": "C:\\Users\\space\\OneDrive\\デスクトップ\\AGIRobots\\make_URDF\\URDF_kitchen\\test_project\\export",
+  "parts": {},
+  "assembly": {
+    "nodes": {},
+    "connections": {}
+  },
+  "dirty_flags": {
+    "stl": false,
+    "parts": false,
+    "assembly": false
+  }
+}

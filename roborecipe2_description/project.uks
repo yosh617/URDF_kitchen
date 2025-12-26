@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "name": "roborecipe2_description",
+  "created": "2025-12-26T11:23:17.831866",
+  "modified": "2025-12-26T11:23:17.831866",
+  "stl_dir": "C:\\Users\\space\\OneDrive\\デスクトップ\\AGIRobots\\make_URDF\\URDF_kitchen\\roborecipe2_description\\stl",
+  "parts_dir": "C:\\Users\\space\\OneDrive\\デスクトップ\\AGIRobots\\make_URDF\\URDF_kitchen\\roborecipe2_description\\parts",
+  "assembly_dir": "C:\\Users\\space\\OneDrive\\デスクトップ\\AGIRobots\\make_URDF\\URDF_kitchen\\roborecipe2_description\\assembly",
+  "export_dir": "C:\\Users\\space\\OneDrive\\デスクトップ\\AGIRobots\\make_URDF\\URDF_kitchen\\roborecipe2_description\\export",
+  "parts": {},
+  "assembly": {
+    "nodes": {},
+    "connections": {}
+  },
+  "dirty_flags": {
+    "stl": false,
+    "parts": false,
+    "assembly": false
+  }
+}
